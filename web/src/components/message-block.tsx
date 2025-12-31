@@ -5,18 +5,45 @@ import {
   Wrench,
   Check,
   X,
-  FileText,
   Terminal,
   Search,
   Pencil,
   FolderOpen,
   Globe,
   MessageSquare,
+  ListTodo,
+  FilePlus2,
+  FileCode,
+  GitBranch,
+  Database,
+  HardDrive,
 } from "lucide-react";
 import { sanitizeText } from "../utils";
+import {
+  TodoRenderer,
+  EditRenderer,
+  WriteRenderer,
+  BashRenderer,
+  BashResultRenderer,
+  GrepRenderer,
+  GlobRenderer,
+  SearchResultRenderer,
+  ReadRenderer,
+  FileContentRenderer,
+} from "./tool-renderers";
 
 interface MessageBlockProps {
   message: ConversationMessage;
+}
+
+function buildToolMap(content: ContentBlock[]): Map<string, string> {
+  const toolMap = new Map<string, string>();
+  for (const block of content) {
+    if (block.type === "tool_use" && block.id && block.name) {
+      toolMap.set(block.id, block.name);
+    }
+  }
+  return toolMap;
 }
 
 const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
@@ -60,11 +87,13 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
   const hasText = hasVisibleText();
   const hasTools = toolBlocks.length > 0;
 
+  const toolMap = Array.isArray(content) ? buildToolMap(content) : new Map<string, string>();
+
   if (!hasText && hasTools) {
     return (
-      <div className="flex flex-wrap items-center gap-1 py-0.5">
+      <div className="flex flex-col gap-1 py-0.5">
         {toolBlocks.map((block, index) => (
-          <ContentBlockRenderer key={index} block={block} />
+          <ContentBlockRenderer key={index} block={block} toolMap={toolMap} />
         ))}
       </div>
     );
@@ -91,20 +120,16 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
           ) : (
             <div className="flex flex-col gap-1">
               {visibleTextBlocks.map((block, index) => (
-                <ContentBlockRenderer key={index} block={block} isUser={isUser} />
+                <ContentBlockRenderer key={index} block={block} isUser={isUser} toolMap={toolMap} />
               ))}
             </div>
           )}
         </div>
 
         {hasTools && (
-          <div
-            className={`flex flex-wrap gap-1 mt-1.5 ${
-              isUser ? "justify-end" : "justify-start"
-            }`}
-          >
+          <div className="flex flex-col gap-1 mt-1.5">
             {toolBlocks.map((block, index) => (
-              <ContentBlockRenderer key={index} block={block} />
+              <ContentBlockRenderer key={index} block={block} toolMap={toolMap} />
             ))}
           </div>
         )}
@@ -116,23 +141,30 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
 interface ContentBlockRendererProps {
   block: ContentBlock;
   isUser?: boolean;
+  toolMap?: Map<string, string>;
 }
 
 function getToolIcon(toolName: string) {
   const name = toolName.toLowerCase();
-  if (name === "read" || name.includes("read")) {
-    return FileText;
+  if (name === "todowrite") {
+    return ListTodo;
   }
-  if (name === "bash" || name.includes("bash") || name.includes("shell")) {
+  if (name === "read") {
+    return FileCode;
+  }
+  if (name === "bash") {
     return Terminal;
   }
-  if (name === "grep" || name.includes("search") || name.includes("grep")) {
+  if (name === "grep") {
     return Search;
   }
-  if (name === "edit" || name === "write" || name.includes("edit") || name.includes("write")) {
+  if (name === "edit") {
     return Pencil;
   }
-  if (name === "glob" || name.includes("glob") || name.includes("find")) {
+  if (name === "write") {
+    return FilePlus2;
+  }
+  if (name === "glob") {
     return FolderOpen;
   }
   if (name.includes("web") || name.includes("fetch") || name.includes("url")) {
@@ -140,6 +172,15 @@ function getToolIcon(toolName: string) {
   }
   if (name.includes("ask") || name.includes("question")) {
     return MessageSquare;
+  }
+  if (name.includes("git") || name.includes("commit")) {
+    return GitBranch;
+  }
+  if (name.includes("sql") || name.includes("database") || name.includes("query")) {
+    return Database;
+  }
+  if (name.includes("file") || name.includes("disk")) {
+    return HardDrive;
   }
   return Wrench;
 }
@@ -188,8 +229,105 @@ function getToolPreview(toolName: string, input: Record<string, unknown> | undef
   return null;
 }
 
+interface ToolInputRendererProps {
+  toolName: string;
+  input: Record<string, unknown>;
+}
+
+function ToolInputRenderer(props: ToolInputRendererProps) {
+  const { toolName, input } = props;
+  const name = toolName.toLowerCase();
+
+  if (name === "todowrite" && input.todos) {
+    return <TodoRenderer todos={input.todos as Array<{ content: string; status: "pending" | "in_progress" | "completed" }>} />;
+  }
+
+  if (name === "edit" && input.file_path) {
+    return <EditRenderer input={input as { file_path: string; old_string: string; new_string: string }} />;
+  }
+
+  if (name === "write" && input.file_path) {
+    return <WriteRenderer input={input as { file_path: string; content: string }} />;
+  }
+
+  if (name === "bash" && input.command) {
+    return <BashRenderer input={input as { command: string; description?: string }} />;
+  }
+
+  if (name === "grep" && input.pattern) {
+    return <GrepRenderer input={input as { pattern: string; path?: string; glob?: string; type?: string }} />;
+  }
+
+  if (name === "glob" && input.pattern) {
+    return <GlobRenderer input={input as { pattern: string; path?: string }} />;
+  }
+
+  if (name === "read" && input.file_path) {
+    return <ReadRenderer input={input as { file_path: string; offset?: number; limit?: number }} />;
+  }
+
+  return (
+    <pre className="text-xs text-slate-300 bg-slate-900/50 border border-slate-700/50 rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
+      {JSON.stringify(input, null, 2)}
+    </pre>
+  );
+}
+
+interface ToolResultRendererProps {
+  toolName: string;
+  content: string;
+  isError?: boolean;
+}
+
+function ToolResultRenderer(props: ToolResultRendererProps) {
+  const { toolName, content, isError } = props;
+  const name = toolName.toLowerCase();
+
+  if (name === "bash") {
+    return <BashResultRenderer content={content} isError={isError} />;
+  }
+
+  if (name === "glob") {
+    return <SearchResultRenderer content={content} isFileList />;
+  }
+
+  if (name === "grep") {
+    return <SearchResultRenderer content={content} />;
+  }
+
+  if (name === "read") {
+    return <FileContentRenderer content={content} />;
+  }
+
+  if (!content || content.trim().length === 0) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 bg-teal-500/10 border border-teal-500/20 rounded-lg mt-2">
+        <Check size={14} className="text-teal-400" />
+        <span className="text-xs text-teal-300">Completed successfully</span>
+      </div>
+    );
+  }
+
+  const maxLength = 2000;
+  const truncated = content.length > maxLength;
+  const displayContent = truncated ? content.slice(0, maxLength) : content;
+
+  return (
+    <pre
+      className={`text-xs rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto border ${
+        isError
+          ? "bg-rose-950/30 text-rose-200/80 border-rose-900/30"
+          : "bg-teal-950/30 text-teal-200/80 border-teal-900/30"
+      }`}
+    >
+      {displayContent}
+      {truncated && <span className="text-zinc-500">... ({content.length - maxLength} more chars)</span>}
+    </pre>
+  );
+}
+
 function ContentBlockRenderer(props: ContentBlockRendererProps) {
-  const { block } = props;
+  const { block, toolMap } = props;
   const [expanded, setExpanded] = useState(false);
 
   if (block.type === "text" && block.text) {
@@ -232,11 +370,24 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
     const hasInput = input && Object.keys(input).length > 0;
     const Icon = getToolIcon(block.name || "");
     const preview = getToolPreview(block.name || "", input);
+    const toolName = block.name?.toLowerCase() || "";
+
+    const hasSpecialRenderer =
+      toolName === "todowrite" ||
+      toolName === "edit" ||
+      toolName === "write" ||
+      toolName === "bash" ||
+      toolName === "grep" ||
+      toolName === "glob" ||
+      toolName === "read";
+
+    const shouldAutoExpand = toolName === "todowrite";
+    const isExpanded = expanded || shouldAutoExpand;
 
     return (
-      <div className={expanded ? "w-full" : ""}>
+      <div className={isExpanded ? "w-full" : ""}>
         <button
-          onClick={() => hasInput && setExpanded(!expanded)}
+          onClick={() => hasInput && !shouldAutoExpand && setExpanded(!expanded)}
           className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-500/10 hover:bg-slate-500/15 text-[11px] text-slate-300 transition-colors border border-slate-500/20"
         >
           <Icon size={12} className="opacity-60" />
@@ -246,16 +397,21 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
               {preview}
             </span>
           )}
-          {hasInput && (
+          {hasInput && !shouldAutoExpand && (
             <span className="text-[10px] opacity-40 ml-0.5">
               {expanded ? "▼" : "▶"}
             </span>
           )}
         </button>
-        {expanded && hasInput && (
-          <pre className="text-xs text-slate-300 bg-slate-900/50 border border-slate-700/50 rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
-            {JSON.stringify(input, null, 2)}
-          </pre>
+        {isExpanded && hasInput && hasSpecialRenderer ? (
+          <ToolInputRenderer toolName={block.name || ""} input={input} />
+        ) : (
+          expanded &&
+          hasInput && (
+            <pre className="text-xs text-slate-300 bg-slate-900/50 border border-slate-700/50 rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
+              {JSON.stringify(input, null, 2)}
+            </pre>
+          )
         )}
       </div>
     );
@@ -270,9 +426,12 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
     const resultContent = sanitizeText(rawContent);
     const hasContent = resultContent.length > 0;
     const previewLength = 60;
-    const contentPreview = hasContent && !expanded
-      ? resultContent.slice(0, previewLength) + (resultContent.length > previewLength ? "..." : "")
-      : null;
+    const contentPreview =
+      hasContent && !expanded
+        ? resultContent.slice(0, previewLength) + (resultContent.length > previewLength ? "..." : "")
+        : null;
+
+    const toolName = block.tool_use_id && toolMap ? toolMap.get(block.tool_use_id) || "" : "";
 
     return (
       <div className={expanded ? "w-full" : ""}>
@@ -290,8 +449,10 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
             <Check size={12} className="opacity-70" />
           )}
           <span className="font-medium">{isError ? "error" : "result"}</span>
-          {contentPreview && (
-            <span className={`font-normal truncate max-w-[200px] ${isError ? "text-rose-500/70" : "text-teal-500/70"}`}>
+          {contentPreview && !expanded && (
+            <span
+              className={`font-normal truncate max-w-[200px] ${isError ? "text-rose-500/70" : "text-teal-500/70"}`}
+            >
               {contentPreview}
             </span>
           )}
@@ -302,16 +463,11 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
           )}
         </button>
         {expanded && hasContent && (
-          <pre
-            className={`text-xs rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto border ${
-              isError
-                ? "bg-rose-950/30 text-rose-200/80 border-rose-900/30"
-                : "bg-teal-950/30 text-teal-200/80 border-teal-900/30"
-            }`}
-          >
-            {resultContent.slice(0, 2000)}
-            {resultContent.length > 2000 ? "..." : ""}
-          </pre>
+          <ToolResultRenderer
+            toolName={toolName}
+            content={resultContent}
+            isError={isError}
+          />
         )}
       </div>
     );

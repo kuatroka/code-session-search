@@ -32,8 +32,10 @@ export interface ContentBlock {
   type: "text" | "thinking" | "tool_use" | "tool_result";
   text?: string;
   thinking?: string;
+  id?: string;
   name?: string;
   input?: unknown;
+  tool_use_id?: string;
   content?: string | ContentBlock[];
   is_error?: boolean;
 }

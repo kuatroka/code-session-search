@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import type { Session } from "@claude-run/shared";
 import SessionList from "./components/session-list";
 import SessionView from "./components/session-view";
+import { useEventSource } from "./hooks/use-event-source";
 
 function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -17,25 +18,21 @@ function App() {
       .catch(console.error);
   }, []);
 
-  useEffect(() => {
-    setLoading(true);
-
-    const eventSource = new EventSource("/api/sessions/stream");
-
-    eventSource.addEventListener("sessions", (event) => {
-      const data = JSON.parse(event.data);
-      setSessions(data);
-      setLoading(false);
-    });
-
-    eventSource.addEventListener("error", () => {
-      setLoading(false);
-    });
-
-    return () => {
-      eventSource.close();
-    };
+  const handleSessionsMessage = useCallback((event: MessageEvent) => {
+    const data = JSON.parse(event.data);
+    setSessions(data);
+    setLoading(false);
   }, []);
+
+  const handleSessionsError = useCallback(() => {
+    setLoading(false);
+  }, []);
+
+  useEventSource("/api/sessions/stream", {
+    onMessage: handleSessionsMessage,
+    onError: handleSessionsError,
+    eventName: "sessions",
+  });
 
   const filteredSessions = useMemo(() => {
     if (!selectedProject) {

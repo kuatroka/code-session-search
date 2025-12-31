@@ -147,12 +147,10 @@ export function createServer(options: ServerOptions) {
         );
         offset = nextOffset;
 
-        if (messages.length > 0) {
-          await stream.writeSSE({
-            event: "messages",
-            data: JSON.stringify(messages),
-          });
-        }
+        await stream.writeSSE({
+          event: "messages",
+          data: JSON.stringify(messages),
+        });
 
         while (isConnected) {
           await stream.writeSSE({

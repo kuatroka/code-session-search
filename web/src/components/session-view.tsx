@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import type { ConversationMessage } from "@claude-run/shared";
 import MessageBlock from "./message-block";
 
@@ -14,46 +14,78 @@ function SessionView(props: SessionViewProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessageRef = useRef<HTMLDivElement>(null);
+  const offsetRef = useRef(0);
+  const retryCountRef = useRef(0);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const mountedRef = useRef(true);
+  const maxRetries = 10;
+  const baseDelay = 1000;
 
-  useEffect(() => {
-    setLoading(true);
-    setMessages([]);
+  const connect = useCallback(() => {
+    if (!mountedRef.current) {
+      return;
+    }
 
-    fetch(`/api/conversation/${sessionId}`)
-      .then((res) => res.json())
-      .then((data: ConversationMessage[]) => {
-        setMessages(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Failed to fetch messages:", err);
-        setLoading(false);
-      });
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
 
     const eventSource = new EventSource(
-      `/api/conversation/${sessionId}/stream?offset=0`
+      `/api/conversation/${sessionId}/stream?offset=${offsetRef.current}`
     );
+    eventSourceRef.current = eventSource;
 
     eventSource.addEventListener("messages", (event) => {
+      retryCountRef.current = 0;
       const newMessages: ConversationMessage[] = JSON.parse(event.data);
+      setLoading(false);
       setMessages((prev) => {
         const existingIds = new Set(prev.map((m) => m.uuid).filter(Boolean));
         const unique = newMessages.filter((m) => !existingIds.has(m.uuid));
         if (unique.length === 0) {
           return prev;
         }
+        offsetRef.current += unique.length;
         return [...prev, ...unique];
       });
     });
 
     eventSource.onerror = () => {
-      console.error("SSE connection error");
-    };
-
-    return () => {
       eventSource.close();
+      setLoading(false);
+
+      if (!mountedRef.current) {
+        return;
+      }
+
+      if (retryCountRef.current < maxRetries) {
+        const delay = Math.min(baseDelay * Math.pow(2, retryCountRef.current), 30000);
+        retryCountRef.current++;
+        retryTimeoutRef.current = setTimeout(() => connect(), delay);
+      }
     };
   }, [sessionId]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    setLoading(true);
+    setMessages([]);
+    offsetRef.current = 0;
+    retryCountRef.current = 0;
+
+    connect();
+
+    return () => {
+      mountedRef.current = false;
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+      }
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
+  }, [connect]);
 
   useEffect(() => {
     if (autoScroll && lastMessageRef.current) {

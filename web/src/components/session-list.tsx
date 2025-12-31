@@ -1,4 +1,5 @@
-import { useState, useMemo, memo } from "react";
+import { useState, useMemo, memo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Session } from "@claude-run/shared";
 import { formatTime } from "../utils";
 
@@ -12,6 +13,7 @@ interface SessionListProps {
 const SessionList = memo(function SessionList(props: SessionListProps) {
   const { sessions, selectedSession, onSelectSession, loading } = props;
   const [search, setSearch] = useState("");
+  const parentRef = useRef<HTMLDivElement>(null);
 
   const filteredSessions = useMemo(() => {
     if (!search.trim()) {
@@ -24,6 +26,14 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
         s.projectName.toLowerCase().includes(query)
     );
   }, [sessions, search]);
+
+  const virtualizer = useVirtualizer({
+    count: filteredSessions.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 76,
+    overscan: 10,
+    measureElement: (element) => element.getBoundingClientRect().height,
+  });
 
   return (
     <div className="h-full overflow-hidden bg-zinc-950 flex flex-col">
@@ -72,7 +82,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div ref={parentRef} className="flex-1 overflow-y-auto">
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <svg
@@ -95,37 +105,53 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
               />
             </svg>
           </div>
+        ) : filteredSessions.length === 0 ? (
+          <p className="py-8 text-center text-xs text-zinc-600">
+            {search ? "No sessions match" : "No sessions found"}
+          </p>
         ) : (
-          <div className="flex flex-col">
-            {filteredSessions.map((session, index) => (
-              <button
-                key={session.id}
-                onClick={() => onSelectSession(session.id)}
-                className={`w-full px-3 py-3.5 text-left transition-colors overflow-hidden border-b border-zinc-800/40 ${
-                  selectedSession === session.id
-                    ? "bg-indigo-500/10"
-                    : "hover:bg-zinc-900/60"
-                } ${index === 0 ? "border-t border-t-zinc-800/40" : ""}`}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] text-zinc-500 font-medium">
-                    {session.projectName}
-                  </span>
-                  <span className="text-[10px] text-zinc-600">
-                    {formatTime(session.timestamp)}
-                  </span>
-                </div>
-                <p className="text-[12px] text-zinc-300 leading-snug line-clamp-2 break-words">
-                  {session.display}
-                </p>
-              </button>
-            ))}
-
-            {filteredSessions.length === 0 && (
-              <p className="py-8 text-center text-xs text-zinc-600">
-                {search ? "No sessions match" : "No sessions found"}
-              </p>
-            )}
+          <div
+            style={{
+              height: `${virtualizer.getTotalSize()}px`,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map((virtualItem) => {
+              const session = filteredSessions[virtualItem.index];
+              return (
+                <button
+                  key={session.id}
+                  data-index={virtualItem.index}
+                  ref={virtualizer.measureElement}
+                  onClick={() => onSelectSession(session.id)}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                  className={`px-3 py-3.5 text-left transition-colors overflow-hidden border-b border-zinc-800/40 ${
+                    selectedSession === session.id
+                      ? "bg-cyan-700/30"
+                      : "hover:bg-zinc-900/60"
+                  } ${virtualItem.index === 0 ? "border-t border-t-zinc-800/40" : ""}`}
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] text-zinc-500 font-medium">
+                      {session.projectName}
+                    </span>
+                    <span className="text-[10px] text-zinc-600">
+                      {formatTime(session.timestamp)}
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-zinc-300 leading-snug line-clamp-2 break-words">
+                    {session.display}
+                  </p>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
