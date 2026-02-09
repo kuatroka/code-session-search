@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import type { Session } from "@claude-run/api";
-import { PanelLeft, Copy, Check } from "lucide-react";
+import type { Session, SessionSource } from "@claude-run/api";
+import { PanelLeft, Copy, Check, Sun, Moon } from "lucide-react";
 import { formatTime } from "./utils";
 import SessionList from "./components/session-list";
 import SessionView from "./components/session-view";
@@ -9,7 +9,7 @@ import { useEventSource } from "./hooks/use-event-source";
 interface SessionHeaderProps {
   session: Session;
   copied: boolean;
-  onCopyResumeCommand: (sessionId: string, projectPath: string) => void;
+  onCopyResumeCommand: (sessionId: string, projectPath: string, source: SessionSource) => void;
 }
 
 function SessionHeader(props: SessionHeaderProps) {
@@ -18,25 +18,26 @@ function SessionHeader(props: SessionHeaderProps) {
   return (
     <>
       <div className="flex items-center gap-3 min-w-0 flex-1">
-        <span className="text-sm text-zinc-300 truncate max-w-xs">
+        <SourceBadge source={session.source} />
+        <span className="text-sm text-zinc-700 dark:text-zinc-300 truncate max-w-xs">
           {session.display}
         </span>
-        <span className="text-xs text-zinc-600 shrink-0">
+        <span className="text-xs text-zinc-400 dark:text-zinc-600 shrink-0">
           {session.projectName}
         </span>
-        <span className="text-xs text-zinc-600 shrink-0">
+        <span className="text-xs text-zinc-400 dark:text-zinc-600 shrink-0">
           {formatTime(session.timestamp)}
         </span>
       </div>
       <button
-        onClick={() => onCopyResumeCommand(session.id, session.project)}
-        className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded transition-colors cursor-pointer shrink-0"
+        onClick={() => onCopyResumeCommand(session.id, session.project, session.source)}
+        className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded transition-colors cursor-pointer shrink-0"
         title="Copy resume command to clipboard"
       >
         {copied ? (
           <>
-            <Check className="w-3.5 h-3.5 text-green-500" />
-            <span className="text-green-500">Copied!</span>
+            <Check className="w-3.5 h-3.5 text-green-600 dark:text-green-500" />
+            <span className="text-green-600 dark:text-green-500">Copied!</span>
           </>
         ) : (
           <>
@@ -49,18 +50,52 @@ function SessionHeader(props: SessionHeaderProps) {
   );
 }
 
+const SOURCE_COLORS: Record<SessionSource, string> = {
+  claude: "bg-blue-500",
+  factory: "bg-emerald-500",
+  codex: "bg-orange-500",
+};
+
+function SourceBadge({ source }: { source: SessionSource }) {
+  return (
+    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${SOURCE_COLORS[source]}`} title={source} />
+  );
+}
+
 function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [selectedSource, setSelectedSource] = useState<SessionSource | null>(null);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("claude-run-theme") as "light" | "dark") || "dark";
+    }
+    return "dark";
+  });
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    localStorage.setItem("claude-run-theme", theme);
+  }, [theme]);
 
   const handleCopyResumeCommand = useCallback(
-    (sessionId: string, projectPath: string) => {
-      const command = `cd ${projectPath} && claude --resume ${sessionId}`;
+    (sessionId: string, projectPath: string, source: SessionSource) => {
+      let command: string;
+      switch (source) {
+        case "factory":
+          command = `cd ${projectPath} && droid --resume ${sessionId}`;
+          break;
+        case "codex":
+          command = `cd ${projectPath} && codex --resume ${sessionId}`;
+          break;
+        default:
+          command = `cd ${projectPath} && claude --resume ${sessionId}`;
+      }
       navigator.clipboard.writeText(command).then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -70,10 +105,7 @@ function App() {
   );
 
   const selectedSessionData = useMemo(() => {
-    if (!selectedSession) {
-      return null;
-    }
-
+    if (!selectedSession) return null;
     return sessions.find((s) => s.id === selectedSession) || null;
   }, [sessions, selectedSession]);
 
@@ -116,27 +148,31 @@ function App() {
   });
 
   const filteredSessions = useMemo(() => {
-    if (!selectedProject) {
-      return sessions;
+    let result = sessions;
+    if (selectedProject) {
+      result = result.filter((s) => s.project === selectedProject);
     }
-    return sessions.filter((s) => s.project === selectedProject);
-  }, [sessions, selectedProject]);
+    if (selectedSource) {
+      result = result.filter((s) => s.source === selectedSource);
+    }
+    return result;
+  }, [sessions, selectedProject, selectedSource]);
 
   const handleSelectSession = useCallback((sessionId: string) => {
     setSelectedSession(sessionId);
   }, []);
 
   return (
-    <div className="flex h-screen bg-zinc-950 text-zinc-100">
+    <div className="flex h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
       {!sidebarCollapsed && (
-        <aside className="w-80 border-r border-zinc-800/60 flex flex-col bg-zinc-950">
-          <div className="border-b border-zinc-800/60">
+        <aside className="w-80 border-r border-zinc-200 dark:border-zinc-800/60 flex flex-col bg-white dark:bg-zinc-950">
+          <div className="border-b border-zinc-200 dark:border-zinc-800/60">
             <label htmlFor={"select-project"} className="block w-full px-1">
               <select
                 id={"select-project"}
                 value={selectedProject || ""}
                 onChange={(e) => setSelectedProject(e.target.value || null)}
-                className="w-full h-[50px] bg-transparent text-zinc-300 text-sm focus:outline-none cursor-pointer px-5 py-4"
+                className="w-full h-[50px] bg-transparent text-zinc-700 dark:text-zinc-300 text-sm focus:outline-none cursor-pointer px-5 py-4"
               >
                 <option value="">All Projects</option>
                 {projects.map((project) => {
@@ -155,20 +191,33 @@ function App() {
             selectedSession={selectedSession}
             onSelectSession={handleSelectSession}
             loading={loading}
+            selectedSource={selectedSource}
+            onSelectSource={setSelectedSource}
           />
         </aside>
       )}
 
-      <main className="flex-1 overflow-hidden bg-zinc-950 flex flex-col">
-        <div className="h-[50px] border-b border-zinc-800/60 flex items-center px-4 gap-4">
+      <main className="flex-1 overflow-hidden bg-white dark:bg-zinc-950 flex flex-col">
+        <div className="h-[50px] border-b border-zinc-200 dark:border-zinc-800/60 flex items-center px-4 gap-4">
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className="p-1.5 hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+            className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded transition-colors cursor-pointer"
             aria-label={
               sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
             }
           >
-            <PanelLeft className="w-4 h-4 text-zinc-400" />
+            <PanelLeft className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
+          </button>
+          <button
+            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+            className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded transition-colors cursor-pointer"
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? (
+              <Sun className="w-4 h-4 text-zinc-400" />
+            ) : (
+              <Moon className="w-4 h-4 text-zinc-600" />
+            )}
           </button>
           {selectedSessionData && (
             <SessionHeader
@@ -182,12 +231,12 @@ function App() {
           {selectedSession ? (
             <SessionView sessionId={selectedSession} />
           ) : (
-            <div className="flex h-full items-center justify-center text-zinc-600">
+            <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600">
               <div className="text-center">
                 <div className="text-base mb-2 text-zinc-500">
                   Select a session
                 </div>
-                <div className="text-sm text-zinc-600">
+                <div className="text-sm text-zinc-400 dark:text-zinc-600">
                   Choose a session from the list to view the conversation
                 </div>
               </div>

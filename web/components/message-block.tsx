@@ -57,16 +57,12 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
   const content = message.message?.content;
 
   const getTextBlocks = (): ContentBlock[] => {
-    if (!content || typeof content === "string") {
-      return [];
-    }
+    if (!content || typeof content === "string") return [];
     return content.filter((b) => b.type === "text");
   };
 
   const getToolBlocks = (): ContentBlock[] => {
-    if (!content || typeof content === "string") {
-      return [];
-    }
+    if (!content || typeof content === "string") return [];
     return content.filter(
       (b) =>
         b.type === "tool_use" || b.type === "tool_result" || b.type === "thinking"
@@ -80,9 +76,7 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
   };
 
   const hasVisibleText = (): boolean => {
-    if (typeof content === "string") {
-      return sanitizeText(content).length > 0;
-    }
+    if (typeof content === "string") return sanitizeText(content).length > 0;
     return getVisibleTextBlocks().length > 0;
   };
 
@@ -103,9 +97,7 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
     );
   }
 
-  if (!hasText && !hasTools) {
-    return null;
-  }
+  if (!hasText && !hasTools) return null;
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} min-w-0`}>
@@ -113,8 +105,8 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
         <div
           className={`px-3.5 py-2.5 rounded-2xl overflow-hidden ${
             isUser
-              ? "bg-indigo-600/80 text-indigo-50 rounded-br-md"
-              : "bg-cyan-700/50 text-zinc-100 rounded-bl-md"
+              ? "bg-indigo-500 dark:bg-indigo-600/80 text-white dark:text-indigo-50 rounded-br-md"
+              : "bg-cyan-100 dark:bg-cyan-700/50 text-zinc-900 dark:text-zinc-100 rounded-bl-md"
           }`}
         >
           {typeof content === "string" ? (
@@ -173,17 +165,10 @@ const TOOL_ICON_PATTERNS: Array<{ patterns: string[]; icon: typeof Wrench }> = [
 
 function getToolIcon(toolName: string) {
   const name = toolName.toLowerCase();
-
-  if (TOOL_ICONS[name]) {
-    return TOOL_ICONS[name];
-  }
-
+  if (TOOL_ICONS[name]) return TOOL_ICONS[name];
   for (const { patterns, icon } of TOOL_ICON_PATTERNS) {
-    if (patterns.some((p) => name.includes(p))) {
-      return icon;
-    }
+    if (patterns.some((p) => name.includes(p))) return icon;
   }
-
   return Wrench;
 }
 
@@ -199,9 +184,7 @@ const TOOL_PREVIEW_HANDLERS: Record<string, PreviewHandler> = {
   edit: (input) => input.file_path ? getFilePathPreview(String(input.file_path)) : null,
   write: (input) => input.file_path ? getFilePathPreview(String(input.file_path)) : null,
   bash: (input) => {
-    if (!input.command) {
-      return null;
-    }
+    if (!input.command) return null;
     const cmd = String(input.command);
     return cmd.length > 50 ? cmd.slice(0, 50) + "..." : cmd;
   },
@@ -211,17 +194,10 @@ const TOOL_PREVIEW_HANDLERS: Record<string, PreviewHandler> = {
 };
 
 function getToolPreview(toolName: string, input: Record<string, unknown> | undefined): string | null {
-  if (!input) {
-    return null;
-  }
-
+  if (!input) return null;
   const name = toolName.toLowerCase();
   const handler = TOOL_PREVIEW_HANDLERS[name];
-
-  if (handler) {
-    return handler(input);
-  }
-
+  if (handler) return handler(input);
   if (name.includes("web") && input.url) {
     try {
       const url = new URL(String(input.url));
@@ -230,7 +206,6 @@ function getToolPreview(toolName: string, input: Record<string, unknown> | undef
       return String(input.url).slice(0, 30);
     }
   }
-
   return null;
 }
 
@@ -246,41 +221,33 @@ function ToolInputRenderer(props: ToolInputRendererProps) {
   if (name === "todowrite" && input.todos) {
     return <TodoRenderer todos={input.todos as Array<{ content: string; status: "pending" | "in_progress" | "completed" }>} />;
   }
-
   if (name === "edit" && input.file_path) {
     return <EditRenderer input={input as { file_path: string; old_string: string; new_string: string }} />;
   }
-
   if (name === "write" && input.file_path) {
     return <WriteRenderer input={input as { file_path: string; content: string }} />;
   }
-
   if (name === "bash" && input.command) {
     return <BashRenderer input={input as { command: string; description?: string }} />;
   }
-
   if (name === "grep" && input.pattern) {
     return <GrepRenderer input={input as { pattern: string; path?: string; glob?: string; type?: string }} />;
   }
-
   if (name === "glob" && input.pattern) {
     return <GlobRenderer input={input as { pattern: string; path?: string }} />;
   }
-
   if (name === "read" && input.file_path) {
     return <ReadRenderer input={input as { file_path: string; offset?: number; limit?: number }} />;
   }
-
   if (name === "askuserquestion" && input.questions) {
     return <AskQuestionRenderer input={input as { questions: Array<{ header: string; question: string; options: Array<{ label: string; description: string }>; multiSelect: boolean }> }} />;
   }
-
   if (name === "task" && input.prompt) {
     return <TaskRenderer input={input as { description: string; prompt: string; subagent_type: string; model?: string; run_in_background?: boolean; resume?: string }} />;
   }
 
   return (
-    <pre className="text-xs text-slate-300 bg-slate-900/50 border border-slate-700/50 rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
+    <pre className="text-xs text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-900/50 border border-slate-300 dark:border-slate-700/50 rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
       {JSON.stringify(input, null, 2)}
     </pre>
   );
@@ -296,27 +263,16 @@ function ToolResultRenderer(props: ToolResultRendererProps) {
   const { toolName, content, isError } = props;
   const name = toolName.toLowerCase();
 
-  if (name === "bash") {
-    return <BashResultRenderer content={content} isError={isError} />;
-  }
-
-  if (name === "glob") {
-    return <SearchResultRenderer content={content} isFileList />;
-  }
-
-  if (name === "grep") {
-    return <SearchResultRenderer content={content} />;
-  }
-
-  if (name === "read") {
-    return <FileContentRenderer content={content} />;
-  }
+  if (name === "bash") return <BashResultRenderer content={content} isError={isError} />;
+  if (name === "glob") return <SearchResultRenderer content={content} isFileList />;
+  if (name === "grep") return <SearchResultRenderer content={content} />;
+  if (name === "read") return <FileContentRenderer content={content} />;
 
   if (!content || content.trim().length === 0) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 bg-teal-500/10 border border-teal-500/20 rounded-lg mt-2">
-        <Check size={14} className="text-teal-400" />
-        <span className="text-xs text-teal-300">Completed successfully</span>
+      <div className="flex items-center gap-2 px-3 py-2 bg-teal-50 dark:bg-teal-500/10 border border-teal-200 dark:border-teal-500/20 rounded-lg mt-2">
+        <Check size={14} className="text-teal-600 dark:text-teal-400" />
+        <span className="text-xs text-teal-700 dark:text-teal-300">Completed successfully</span>
       </div>
     );
   }
@@ -329,8 +285,8 @@ function ToolResultRenderer(props: ToolResultRendererProps) {
     <pre
       className={`text-xs rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto border ${
         isError
-          ? "bg-rose-950/30 text-rose-200/80 border-rose-900/30"
-          : "bg-teal-950/30 text-teal-200/80 border-teal-900/30"
+          ? "bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-200/80 border-rose-200 dark:border-rose-900/30"
+          : "bg-teal-50 dark:bg-teal-950/30 text-teal-700 dark:text-teal-200/80 border-teal-200 dark:border-teal-900/30"
       }`}
     >
       {displayContent}
@@ -345,9 +301,7 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
 
   if (block.type === "text" && block.text) {
     const sanitized = sanitizeText(block.text);
-    if (!sanitized) {
-      return null;
-    }
+    if (!sanitized) return null;
     if (isUser) {
       return (
         <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">
@@ -363,7 +317,7 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
       <div className={expanded ? "w-full" : ""}>
         <button
           onClick={() => setExpanded(!expanded)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/15 text-[11px] text-amber-400/90 transition-colors border border-amber-500/20"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 dark:bg-amber-500/10 hover:bg-amber-200 dark:hover:bg-amber-500/15 text-[11px] text-amber-700 dark:text-amber-400/90 transition-colors border border-amber-200 dark:border-amber-500/20"
         >
           <Lightbulb size={12} className="opacity-70" />
           <span className="font-medium">thinking</span>
@@ -372,7 +326,7 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
           </span>
         </button>
         {expanded && (
-          <pre className="text-xs text-zinc-400 bg-zinc-900/80 border border-zinc-800 rounded-lg p-3 mt-2 whitespace-pre-wrap max-h-80 overflow-y-auto">
+          <pre className="text-xs text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 mt-2 whitespace-pre-wrap max-h-80 overflow-y-auto">
             {block.thinking}
           </pre>
         )}
@@ -406,12 +360,12 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
       <div className={isExpanded ? "w-full" : ""}>
         <button
           onClick={() => hasInput && !shouldAutoExpand && setExpanded(!expanded)}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-500/10 hover:bg-slate-500/15 text-[11px] text-slate-300 transition-colors border border-slate-500/20"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-500/10 hover:bg-slate-200 dark:hover:bg-slate-500/15 text-[11px] text-slate-600 dark:text-slate-300 transition-colors border border-slate-200 dark:border-slate-500/20"
         >
           <Icon size={12} className="opacity-60" />
-          <span className="font-medium text-slate-200">{block.name}</span>
+          <span className="font-medium text-slate-700 dark:text-slate-200">{block.name}</span>
           {preview && (
-            <span className="text-slate-500 font-normal truncate max-w-[200px]">
+            <span className="text-slate-400 dark:text-slate-500 font-normal truncate max-w-[200px]">
               {preview}
             </span>
           )}
@@ -426,7 +380,7 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
         ) : (
           expanded &&
           hasInput && (
-            <pre className="text-xs text-slate-300 bg-slate-900/50 border border-slate-700/50 rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
+            <pre className="text-xs text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-900/50 border border-slate-300 dark:border-slate-700/50 rounded-lg p-3 mt-2 overflow-x-auto whitespace-pre-wrap break-all max-h-80 overflow-y-auto">
               {JSON.stringify(input, null, 2)}
             </pre>
           )
@@ -457,8 +411,8 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
           onClick={() => hasContent && setExpanded(!expanded)}
           className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] transition-colors border ${
             isError
-              ? "bg-rose-500/10 hover:bg-rose-500/15 text-rose-400/90 border-rose-500/20"
-              : "bg-teal-500/10 hover:bg-teal-500/15 text-teal-400/90 border-teal-500/20"
+              ? "bg-rose-50 dark:bg-rose-500/10 hover:bg-rose-100 dark:hover:bg-rose-500/15 text-rose-600 dark:text-rose-400/90 border-rose-200 dark:border-rose-500/20"
+              : "bg-teal-50 dark:bg-teal-500/10 hover:bg-teal-100 dark:hover:bg-teal-500/15 text-teal-600 dark:text-teal-400/90 border-teal-200 dark:border-teal-500/20"
           }`}
         >
           {isError ? (
@@ -469,7 +423,7 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
           <span className="font-medium">{isError ? "error" : "result"}</span>
           {contentPreview && !expanded && (
             <span
-              className={`font-normal truncate max-w-[200px] ${isError ? "text-rose-500/70" : "text-teal-500/70"}`}
+              className={`font-normal truncate max-w-[200px] ${isError ? "text-rose-400 dark:text-rose-500/70" : "text-teal-400 dark:text-teal-500/70"}`}
             >
               {contentPreview}
             </span>

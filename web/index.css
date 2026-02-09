@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @font-face {
   font-family: "Geist Mono";
   src: url("https://cdn.jsdelivr.net/npm/geist@1.3.1/dist/fonts/geist-mono/GeistMono-Regular.woff2")
@@ -27,18 +29,21 @@
   font-display: swap;
 }
 
-:root {
-  color-scheme: dark;
-}
-
 body {
   font-family: "Geist Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
     Consolas, monospace;
+}
+
+.dark body {
   background: #09090b;
 }
 
 * {
   scrollbar-width: thin;
+  scrollbar-color: #d4d4d8 transparent;
+}
+
+.dark * {
   scrollbar-color: #27272a transparent;
 }
 
@@ -52,19 +57,31 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #27272a;
+  background: #d4d4d8;
   border-radius: 3px;
 }
 
+.dark ::-webkit-scrollbar-thumb {
+  background: #27272a;
+}
+
 ::-webkit-scrollbar-thumb:hover {
+  background: #a1a1aa;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
   background: #3f3f46;
 }
 
 pre {
-  background: #18181b;
+  background: #f4f4f5;
   border-radius: 8px;
   padding: 12px;
   overflow-x: auto;
+}
+
+.dark pre {
+  background: #18181b;
 }
 
 code {
@@ -74,6 +91,11 @@ code {
 }
 
 select option {
+  background: #ffffff;
+  color: #27272a;
+}
+
+.dark select option {
   background: #18181b;
   color: #e4e4e7;
 }

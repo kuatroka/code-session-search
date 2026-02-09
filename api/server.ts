@@ -1,20 +1,22 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { serveStatic } from "@hono/node-server/serve-static";
 import { streamSSE } from "hono/streaming";
-import { serve } from "@hono/node-server";
-import type { ServerType } from "@hono/node-server";
 import {
   initStorage,
   loadStorage,
   getClaudeDir,
+  getFactoryDir,
+  getCodexDir,
   getSessions,
   getProjects,
   getConversation,
   getConversationStream,
   invalidateHistoryCache,
   addToFileIndex,
+  getSessionSource,
+  getAllSessionContent,
 } from "./storage";
+import type { SessionSource } from "./storage";
 import {
   initWatcher,
   startWatcher,
@@ -24,20 +26,23 @@ import {
   onSessionChange,
   offSessionChange,
 } from "./watcher";
-import { join, dirname } from "path";
-import { fileURLToPath } from "url";
-import { readFileSync, existsSync } from "fs";
+import {
+  initSearchDb,
+  searchSessions,
+  indexSession,
+  isSessionIndexed,
+  closeSearchDb,
+} from "./search";
+import { join } from "path";
+import { existsSync } from "fs";
 import open from "open";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 function getWebDistPath(): string {
-  const prodPath = join(__dirname, "web");
+  const prodPath = join(import.meta.dir, "web");
   if (existsSync(prodPath)) {
     return prodPath;
   }
-  return join(__dirname, "..", "dist", "web");
+  return join(import.meta.dir, "..", "dist", "web");
 }
 
 export interface ServerOptions {
@@ -51,7 +56,7 @@ export function createServer(options: ServerOptions) {
   const { port, claudeDir, dev = false, open: shouldOpen = true } = options;
 
   initStorage(claudeDir);
-  initWatcher(getClaudeDir());
+  initWatcher(getClaudeDir(), getFactoryDir(), getCodexDir());
 
   const app = new Hono();
 
@@ -160,7 +165,7 @@ export function createServer(options: ServerOptions) {
         offSessionChange(handleSessionChange);
       };
 
-      const handleSessionChange = async (changedSessionId: string) => {
+      const handleSessionChange = async (changedSessionId: string, _filePath: string, _source: SessionSource) => {
         if (changedSessionId !== sessionId || !isConnected) {
           return;
         }
@@ -211,55 +216,98 @@ export function createServer(options: ServerOptions) {
     });
   });
 
+  app.get("/api/search", async (c) => {
+    const query = c.req.query("q") || "";
+    const source = c.req.query("source") || undefined;
+    const results = searchSessions(query, source);
+    return c.json(results);
+  });
+
   const webDistPath = getWebDistPath();
 
-  app.use("/*", serveStatic({ root: webDistPath }));
-
   app.get("/*", async (c) => {
-    const indexPath = join(webDistPath, "index.html");
-    try {
-      const html = readFileSync(indexPath, "utf-8");
-      return c.html(html);
-    } catch {
-      return c.text("UI not found. Run 'pnpm build' first.", 404);
+    const reqPath = c.req.path === "/" ? "/index.html" : c.req.path;
+    const filePath = join(webDistPath, reqPath);
+    const file = Bun.file(filePath);
+    if (await file.exists()) {
+      return new Response(file);
     }
+    const indexFile = Bun.file(join(webDistPath, "index.html"));
+    if (await indexFile.exists()) {
+      return new Response(indexFile, { headers: { "content-type": "text/html" } });
+    }
+    return c.text("UI not found. Run 'bun run build' first.", 404);
   });
 
   onHistoryChange(() => {
     invalidateHistoryCache();
   });
 
-  onSessionChange((sessionId: string, filePath: string) => {
-    addToFileIndex(sessionId, filePath);
+  onSessionChange(async (sessionId: string, filePath: string, source: SessionSource) => {
+    addToFileIndex(sessionId, filePath, source);
+    try {
+      const content = await getAllSessionContent(sessionId);
+      const sessions = await getSessions();
+      const session = sessions.find((s) => s.id === sessionId);
+      if (session) {
+        indexSession(sessionId, source, session.display, session.project, content);
+      }
+    } catch { /* ignore indexing errors */ }
   });
 
   startWatcher();
 
-  let httpServer: ServerType | null = null;
+  let httpServer: ReturnType<typeof Bun.serve> | null = null;
 
   return {
     app,
     port,
     start: async () => {
       await loadStorage();
-      const openUrl = `http://localhost:${dev ? 12000 : port}/`;
+      initSearchDb();
 
+      const openUrl = `http://localhost:${dev ? 12000 : port}/`;
       console.log(`\n  claude-run is running at ${openUrl}\n`);
       if (!dev && shouldOpen) {
         open(openUrl).catch(console.error);
       }
 
-      httpServer = serve({
-        fetch: app.fetch,
+      httpServer = Bun.serve({
         port,
+        fetch: app.fetch,
       });
+
+      // Background indexing
+      (async () => {
+        try {
+          const sessions = await getSessions();
+          let indexed = 0;
+          for (const session of sessions) {
+            if (isSessionIndexed(session.id)) continue;
+            try {
+              const content = await getAllSessionContent(session.id);
+              indexSession(session.id, session.source, session.display, session.project, content);
+              indexed++;
+              if (indexed % 50 === 0) {
+                console.log(`  Indexed ${indexed}/${sessions.length} sessions...`);
+              }
+            } catch { /* skip individual errors */ }
+          }
+          if (indexed > 0) {
+            console.log(`  Search index: ${indexed} new sessions indexed\n`);
+          }
+        } catch (err) {
+          console.error("Search indexing error:", err);
+        }
+      })();
 
       return httpServer;
     },
     stop: () => {
       stopWatcher();
+      closeSearchDb();
       if (httpServer) {
-        httpServer.close();
+        httpServer.stop();
       }
     },
   };

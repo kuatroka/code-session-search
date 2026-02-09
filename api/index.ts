@@ -1,18 +1,13 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import { program } from "commander";
 import { createServer } from "./server";
 import { homedir } from "os";
 import { join } from "path";
 import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 function getVersion(): string {
   try {
-    const pkgPath = join(__dirname, "..", "package.json");
+    const pkgPath = join(import.meta.dir, "..", "package.json");
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
     return pkg.version;
   } catch {

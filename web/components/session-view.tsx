@@ -28,13 +28,8 @@ function SessionView(props: SessionViewProps) {
   const mountedRef = useRef(true);
 
   const connect = useCallback(() => {
-    if (!mountedRef.current) {
-      return;
-    }
-
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-    }
+    if (!mountedRef.current) return;
+    if (eventSourceRef.current) eventSourceRef.current.close();
 
     const eventSource = new EventSource(
       `/api/conversation/${sessionId}/stream?offset=${offsetRef.current}`
@@ -48,9 +43,7 @@ function SessionView(props: SessionViewProps) {
       setMessages((prev) => {
         const existingIds = new Set(prev.map((m) => m.uuid).filter(Boolean));
         const unique = newMessages.filter((m) => !existingIds.has(m.uuid));
-        if (unique.length === 0) {
-          return prev;
-        }
+        if (unique.length === 0) return prev;
         offsetRef.current += unique.length;
         return [...prev, ...unique];
       });
@@ -59,11 +52,7 @@ function SessionView(props: SessionViewProps) {
     eventSource.onerror = () => {
       eventSource.close();
       setLoading(false);
-
-      if (!mountedRef.current) {
-        return;
-      }
-
+      if (!mountedRef.current) return;
       if (retryCountRef.current < MAX_RETRIES) {
         const delay = Math.min(BASE_RETRY_DELAY_MS * Math.pow(2, retryCountRef.current), MAX_RETRY_DELAY_MS);
         retryCountRef.current++;
@@ -78,24 +67,16 @@ function SessionView(props: SessionViewProps) {
     setMessages([]);
     offsetRef.current = 0;
     retryCountRef.current = 0;
-
     connect();
-
     return () => {
       mountedRef.current = false;
-      if (retryTimeoutRef.current) {
-        clearTimeout(retryTimeoutRef.current);
-      }
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
+      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+      if (eventSourceRef.current) eventSourceRef.current.close();
     };
   }, [connect]);
 
   const scrollToBottom = useCallback(() => {
-    if (!lastMessageRef.current) {
-      return;
-    }
+    if (!lastMessageRef.current) return;
     isScrollingProgrammaticallyRef.current = true;
     lastMessageRef.current.scrollIntoView({ behavior: "instant" });
     requestAnimationFrame(() => {
@@ -104,16 +85,11 @@ function SessionView(props: SessionViewProps) {
   }, []);
 
   useEffect(() => {
-    if (autoScroll) {
-      scrollToBottom();
-    }
+    if (autoScroll) scrollToBottom();
   }, [messages, autoScroll, scrollToBottom]);
 
   const handleScroll = () => {
-    if (!containerRef.current || isScrollingProgrammaticallyRef.current) {
-      return;
-    }
-
+    if (!containerRef.current || isScrollingProgrammaticallyRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
     const isAtBottom = scrollHeight - scrollTop - clientHeight < SCROLL_THRESHOLD_PX;
     setAutoScroll(isAtBottom);
@@ -137,12 +113,12 @@ function SessionView(props: SessionViewProps) {
       <div
         ref={containerRef}
         onScroll={handleScroll}
-        className="h-full overflow-y-auto bg-zinc-950"
+        className="h-full overflow-y-auto bg-white dark:bg-zinc-950"
       >
         <div className="mx-auto max-w-3xl px-4 py-4">
           {summary && (
-            <div className="mb-6 rounded-xl border border-zinc-800/60 bg-zinc-900/50 p-4">
-              <h2 className="text-sm font-medium text-zinc-200 leading-relaxed">
+            <div className="mb-6 rounded-xl border border-zinc-200 dark:border-zinc-800/60 bg-zinc-50 dark:bg-zinc-900/50 p-4">
+              <h2 className="text-sm font-medium text-zinc-800 dark:text-zinc-200 leading-relaxed">
                 {summary.summary}
               </h2>
               <p className="mt-2 text-[11px] text-zinc-500">
