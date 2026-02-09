@@ -91,6 +91,7 @@ export function createServer(options: ServerOptions) {
       const cleanup = () => {
         isConnected = false;
         offHistoryChange(handleHistoryChange);
+        offSessionChange(handleContentChange);
       };
 
       const handleHistoryChange = async () => {
@@ -119,7 +120,30 @@ export function createServer(options: ServerOptions) {
         }
       };
 
+      const handleContentChange = async (sessionId: string, _filePath: string, source: SessionSource) => {
+        if (!isConnected) return;
+        try {
+          const content = await getAllSessionContent(sessionId);
+          const sessions = await getSessions();
+          const session = sessions.find((s) => s.id === sessionId);
+          if (session) {
+            await stream.writeSSE({
+              event: "contentUpdate",
+              data: JSON.stringify({
+                id: sessionId,
+                source,
+                display: session.display,
+                project: session.project,
+                content,
+                timestamp: session.timestamp,
+              }),
+            });
+          }
+        } catch { /* ignore */ }
+      };
+
       onHistoryChange(handleHistoryChange);
+      onSessionChange(handleContentChange);
       c.req.raw.signal.addEventListener("abort", cleanup);
 
       try {
@@ -223,6 +247,21 @@ export function createServer(options: ServerOptions) {
     const source = c.req.query("source") || undefined;
     const results = searchSessions(query, source);
     return c.json(results);
+  });
+
+  app.get("/api/search-index", async (c) => {
+    const sessions = await getSessions();
+    const entries = await Promise.all(
+      sessions.map(async (s) => {
+        try {
+          const content = await getAllSessionContent(s.id);
+          return { id: s.id, source: s.source, display: s.display, project: s.project, content, timestamp: s.timestamp };
+        } catch {
+          return { id: s.id, source: s.source, display: s.display, project: s.project, content: "", timestamp: s.timestamp };
+        }
+      })
+    );
+    return c.json(entries);
   });
 
   const webDistPath = getWebDistPath();

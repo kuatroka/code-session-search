@@ -2,16 +2,7 @@ import { useState, useMemo, memo, useRef, useEffect, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Session, SessionSource } from "@claude-run-plus/api";
 import { formatTime } from "../utils";
-
-interface SearchResult {
-  sessionId: string;
-  source: string;
-  display: string;
-  project: string;
-  snippet: string;
-  rank: number;
-  timestamp: number;
-}
+import { useSearchIndex, type ClientSearchResult } from "../hooks/use-search-index";
 
 const SOURCE_COLORS: Record<SessionSource, string> = {
   claude: "bg-blue-500",
@@ -39,51 +30,26 @@ interface SessionListProps {
 const SessionList = memo(function SessionList(props: SessionListProps) {
   const { sessions, selectedSession, onSelectSession, loading, selectedSource, onSelectSource, onSearchQueryChange } = props;
   const [search, setSearch] = useState("");
-  const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
-  const [searching, setSearching] = useState(false);
-  const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [highlightIdx, setHighlightIdx] = useState(-1);
   const parentRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const resultRefsMap = useRef<Map<number, HTMLButtonElement>>(new Map());
 
-  const doSearch = useCallback(async (query: string, source: SessionSource | null) => {
-    if (!query.trim()) {
-      setSearchResults(null);
-      setSearching(false);
-      return;
-    }
-    setSearching(true);
-    try {
-      const params = new URLSearchParams({ q: query });
-      if (source) params.set("source", source);
-      const res = await fetch(`/api/search?${params}`);
-      const results: SearchResult[] = await res.json();
-      setSearchResults(results);
-    } catch {
-      setSearchResults([]);
-    } finally {
-      setSearching(false);
-    }
-  }, []);
+  const { search: clientSearch, ready: searchReady } = useSearchIndex();
+
+  const searchResults = useMemo<ClientSearchResult[] | null>(() => {
+    if (!search.trim() || !searchReady) return null;
+    return clientSearch(search, selectedSource);
+  }, [search, selectedSource, searchReady, clientSearch]);
 
   useEffect(() => {
     onSearchQueryChange?.(search);
   }, [search, onSearchQueryChange]);
 
+  // Reset highlight when results change
   useEffect(() => {
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-
-    if (!search.trim()) {
-      setSearchResults(null);
-      return;
-    }
-
-    searchTimeoutRef.current = setTimeout(() => {
-      doSearch(search, selectedSource);
-    }, 300);
-
-    return () => {
-      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    };
-  }, [search, selectedSource, doSearch]);
+    setHighlightIdx(-1);
+  }, [searchResults, sessions]);
 
   const filteredSessions = useMemo(() => {
     if (searchResults !== null) return [];
@@ -99,6 +65,78 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
   });
 
   const showSearchResults = searchResults !== null && search.trim().length > 0;
+
+  // The navigable list: search results or filtered sessions
+  const navListLength = showSearchResults
+    ? searchResults!.length
+    : filteredSessions.length;
+
+  const selectAtIndex = useCallback((idx: number) => {
+    if (showSearchResults && searchResults) {
+      const r = searchResults[idx];
+      if (r) onSelectSession(r.sessionId);
+    } else {
+      const s = filteredSessions[idx];
+      if (s) onSelectSession(s.id);
+    }
+  }, [showSearchResults, searchResults, filteredSessions, onSelectSession]);
+
+  // Scroll highlighted result into view
+  useEffect(() => {
+    if (highlightIdx < 0) return;
+    if (showSearchResults) {
+      const el = resultRefsMap.current.get(highlightIdx);
+      el?.scrollIntoView({ block: "nearest" });
+    } else {
+      virtualizer.scrollToIndex(highlightIdx, { align: "auto" });
+    }
+  }, [highlightIdx, showSearchResults, virtualizer]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (navListLength === 0) return;
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightIdx((prev) => (prev < navListLength - 1 ? prev + 1 : 0));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightIdx((prev) => (prev > 0 ? prev - 1 : navListLength - 1));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlightIdx >= 0) {
+        selectAtIndex(highlightIdx);
+      }
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      if (search) {
+        setSearch("");
+      } else {
+        searchInputRef.current?.blur();
+      }
+    }
+  }, [navListLength, highlightIdx, selectAtIndex, search]);
+
+  // "/" global shortcut
+  useEffect(() => {
+    const handleGlobalKey = (e: KeyboardEvent) => {
+      if (e.key === "/" && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handleGlobalKey);
+    return () => document.removeEventListener("keydown", handleGlobalKey);
+  }, []);
+
+  const setResultRef = useCallback((idx: number, el: HTMLButtonElement | null) => {
+    if (el) {
+      resultRefsMap.current.set(idx, el);
+    } else {
+      resultRefsMap.current.delete(idx);
+    }
+  }, []);
+
+  const placeholder = searchReady ? "Search... (press /)" : "Indexing...";
 
   return (
     <div className="h-full overflow-hidden bg-white dark:bg-zinc-950 flex flex-col">
@@ -134,13 +172,15 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
             />
           </svg>
           <input
+            ref={searchInputRef}
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Full-text search..."
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder}
             className="flex-1 bg-transparent text-sm text-zinc-800 dark:text-zinc-200 placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none"
           />
-          {searching && (
+          {!searchReady && (
             <svg
               className="w-4 h-4 text-zinc-400 animate-spin flex-shrink-0"
               fill="none"
@@ -186,20 +226,23 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
             </svg>
           </div>
         ) : showSearchResults ? (
-          searchResults.length === 0 ? (
+          searchResults!.length === 0 ? (
             <p className="py-8 text-center text-xs text-zinc-400 dark:text-zinc-600">
               No results found
             </p>
           ) : (
             <div className="divide-y divide-zinc-200/60 dark:divide-zinc-800/40">
-              {searchResults.map((result) => (
+              {searchResults!.map((result, idx) => (
                 <button
                   key={result.sessionId}
+                  ref={(el) => setResultRef(idx, el)}
                   onClick={() => onSelectSession(result.sessionId)}
                   className={`w-full px-3 py-3 text-left transition-colors ${
-                    selectedSession === result.sessionId
-                      ? "bg-cyan-100 dark:bg-cyan-700/30"
-                      : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
+                    highlightIdx === idx
+                      ? "bg-zinc-100 dark:bg-zinc-800"
+                      : selectedSession === result.sessionId
+                        ? "bg-cyan-100 dark:bg-cyan-700/30"
+                        : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -239,6 +282,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
           >
             {virtualizer.getVirtualItems().map((virtualItem) => {
               const session = filteredSessions[virtualItem.index];
+              const isHighlighted = highlightIdx === virtualItem.index;
               return (
                 <button
                   key={session.id}
@@ -253,9 +297,11 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                     transform: `translateY(${virtualItem.start}px)`,
                   }}
                   className={`px-3 py-3.5 text-left transition-colors overflow-hidden border-b border-zinc-200/60 dark:border-zinc-800/40 ${
-                    selectedSession === session.id
-                      ? "bg-cyan-100 dark:bg-cyan-700/30"
-                      : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
+                    isHighlighted
+                      ? "bg-zinc-100 dark:bg-zinc-800"
+                      : selectedSession === session.id
+                        ? "bg-cyan-100 dark:bg-cyan-700/30"
+                        : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
                   } ${virtualItem.index === 0 ? "border-t border-t-zinc-200/60 dark:border-t-zinc-800/40" : ""}`}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -282,7 +328,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
       <div className="px-3 py-2 border-t border-zinc-200 dark:border-zinc-800/60">
         <div className="text-[10px] text-zinc-400 dark:text-zinc-600 text-center">
           {showSearchResults
-            ? `${searchResults.length} result${searchResults.length !== 1 ? "s" : ""}`
+            ? `${searchResults!.length} result${searchResults!.length !== 1 ? "s" : ""}`
             : `${sessions.length} session${sessions.length !== 1 ? "s" : ""}`
           }
         </div>

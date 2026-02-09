@@ -21,7 +21,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-
+    "@leeoniya/ufuzzy": "^1.0.19",
     "@tanstack/react-virtual": "^3.13.14",
     "chokidar": "^4.0.3",
     "commander": "^13.1.0",
