@@ -10,6 +10,7 @@ export interface SearchResult {
   project: string;
   snippet: string;
   rank: number;
+  timestamp: number;
 }
 
 let db: Database | null = null;
@@ -42,6 +43,12 @@ export function initSearchDb(): void {
       last_indexed_at INTEGER
     )
   `);
+
+  // Migration: add timestamp column if missing
+  const cols = db.query("PRAGMA table_info(session_index_meta)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "session_timestamp")) {
+    db.run("ALTER TABLE session_index_meta ADD COLUMN session_timestamp INTEGER DEFAULT 0");
+  }
 }
 
 export function indexSession(
@@ -49,7 +56,8 @@ export function indexSession(
   source: string,
   display: string,
   project: string,
-  content: string
+  content: string,
+  timestamp?: number
 ): void {
   if (!db) return;
 
@@ -66,40 +74,67 @@ export function indexSession(
     [sessionId, source, display, project, content]
   );
   db.run(
-    "INSERT OR REPLACE INTO session_index_meta (session_id, source, last_indexed_at) VALUES (?, ?, ?)",
-    [sessionId, source, Date.now()]
+    "INSERT OR REPLACE INTO session_index_meta (session_id, source, last_indexed_at, session_timestamp) VALUES (?, ?, ?, ?)",
+    [sessionId, source, Date.now(), timestamp || 0]
   );
 }
 
 export function searchSessions(query: string, source?: string): SearchResult[] {
   if (!db || !query.trim()) return [];
 
-  const ftsQuery = query
-    .trim()
-    .split(/\s+/)
+  const words = query.trim().split(/\s+/);
+  const ftsQuery = words
     .map((w) => `"${w.replace(/"/g, '""')}"`)
     .join(" ");
 
+  const exactPhrase = query.trim().toLowerCase();
+
   let sql = `
-    SELECT session_id as sessionId, source, display, project,
+    SELECT f.session_id as sessionId, f.source, f.display, f.project,
            snippet(sessions_fts, 4, '<mark>', '</mark>', '...', 40) as snippet,
-           rank
-    FROM sessions_fts
+           f.rank,
+           COALESCE(m.session_timestamp, 0) as timestamp
+    FROM sessions_fts f
+    LEFT JOIN session_index_meta m ON f.session_id = m.session_id
     WHERE sessions_fts MATCH ?
   `;
-  const params: string[] = [ftsQuery];
+  const params: (string | number)[] = [ftsQuery];
 
   if (source) {
-    sql += " AND source = ?";
+    sql += " AND f.source = ?";
     params.push(source);
   }
 
-  sql += " ORDER BY rank LIMIT 50";
+  sql += " ORDER BY f.rank LIMIT 100";
 
   try {
-    return db.query(sql).all(...params) as SearchResult[];
+    const results = db.query(sql).all(...params) as SearchResult[];
+
+    // Boost exact phrase matches to the top, then sort by timestamp (most recent first)
+    return results
+      .map((r) => {
+        const content = getIndexedContent(r.sessionId);
+        const hasExactPhrase = content?.toLowerCase().includes(exactPhrase);
+        return { ...r, _exact: hasExactPhrase ? 1 : 0 };
+      })
+      .sort((a, b) => {
+        if (a._exact !== b._exact) return b._exact - a._exact;
+        return b.timestamp - a.timestamp;
+      })
+      .slice(0, 50)
+      .map(({ _exact, ...r }) => r);
   } catch {
     return [];
+  }
+}
+
+function getIndexedContent(sessionId: string): string | null {
+  if (!db) return null;
+  try {
+    const row = db.query("SELECT content FROM sessions_fts WHERE session_id = ?").get(sessionId) as { content: string } | null;
+    return row?.content || null;
+  } catch {
+    return null;
   }
 }
 

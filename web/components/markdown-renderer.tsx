@@ -1,17 +1,49 @@
-import { memo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CopyButton } from "./tool-renderers";
 
+function highlightText(text: string, words: string[]): ReactNode {
+  if (words.length === 0) return text;
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+  const parts = text.split(regex);
+  if (parts.length === 1) return text;
+  return parts.map((part, i) =>
+    regex.test(part) ? (
+      <mark key={i} className="bg-yellow-200 dark:bg-yellow-500/40 text-inherit rounded-sm px-0.5">
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+}
+
+function highlightChildren(children: ReactNode, words: string[]): ReactNode {
+  if (!words.length) return children;
+  if (typeof children === "string") return highlightText(children, words);
+  if (Array.isArray(children)) return children.map((child, i) => {
+    if (typeof child === "string") return <span key={i}>{highlightText(child, words)}</span>;
+    return child;
+  });
+  return children;
+}
+
+export { highlightText, highlightChildren };
+
 interface MarkdownRendererProps {
   content: string;
   className?: string;
+  highlightWords?: string[];
 }
 
 export const MarkdownRenderer = memo(function MarkdownRenderer(
   props: MarkdownRendererProps
 ) {
-  const { content, className = "" } = props;
+  const { content, className = "", highlightWords } = props;
+  const hw = highlightWords || [];
+  const hl = (children: ReactNode) => highlightChildren(children, hw);
 
   return (
     <div className={`break-words ${className}`}>
@@ -22,7 +54,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <div className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mt-3 mb-1.5">
-                {children}
+                {hl(children)}
               </div>
             );
           },
@@ -30,7 +62,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mt-3 mb-1.5">
-                {children}
+                {hl(children)}
               </div>
             );
           },
@@ -38,7 +70,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <div className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 mt-3 mb-1.5">
-                {children}
+                {hl(children)}
               </div>
             );
           },
@@ -46,7 +78,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <div className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 mt-2 mb-1">
-                {children}
+                {hl(children)}
               </div>
             );
           },
@@ -54,7 +86,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <div className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 mt-2 mb-1">
-                {children}
+                {hl(children)}
               </div>
             );
           },
@@ -62,7 +94,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <div className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 mt-2 mb-1">
-                {children}
+                {hl(children)}
               </div>
             );
           },
@@ -70,7 +102,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <p className="text-[13px] leading-relaxed text-zinc-800 dark:text-zinc-200 whitespace-pre-wrap my-2">
-                {children}
+                {hl(children)}
               </p>
             );
           },
@@ -152,7 +184,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
           li: (props) => {
             const { children } = props;
             return (
-              <li className="text-[13px] leading-relaxed">{children}</li>
+              <li className="text-[13px] leading-relaxed">{hl(children)}</li>
             );
           },
           blockquote: (props) => {
@@ -188,13 +220,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <th className="px-3 py-2 text-left font-medium text-zinc-800 dark:text-zinc-200">
-                {children}
+                {hl(children)}
               </th>
             );
           },
           td: (props) => {
             const { children } = props;
-            return <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{children}</td>;
+            return <td className="px-3 py-2 text-zinc-700 dark:text-zinc-300">{hl(children)}</td>;
           },
         }}
       >

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import type { ConversationMessage } from "@claude-run-plus/api";
 import MessageBlock from "./message-block";
 import ScrollToBottomButton from "./scroll-to-bottom-button";
@@ -10,22 +10,45 @@ const SCROLL_THRESHOLD_PX = 100;
 
 interface SessionViewProps {
   sessionId: string;
+  searchQuery?: string;
+}
+
+function getMessageText(message: ConversationMessage): string {
+  const content = message.message?.content;
+  if (!content) return "";
+  if (typeof content === "string") return content;
+  return content
+    .map((b) => b.text || b.thinking || "")
+    .join(" ");
+}
+
+function messageMatchesQuery(message: ConversationMessage, words: string[]): boolean {
+  if (words.length === 0) return false;
+  const text = getMessageText(message).toLowerCase();
+  return words.every((w) => text.includes(w));
 }
 
 function SessionView(props: SessionViewProps) {
-  const { sessionId } = props;
+  const { sessionId, searchQuery } = props;
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessageRef = useRef<HTMLDivElement>(null);
+  const firstMatchRef = useRef<HTMLDivElement>(null);
+  const hasScrolledToMatchRef = useRef(false);
   const offsetRef = useRef(0);
   const isScrollingProgrammaticallyRef = useRef(false);
   const retryCountRef = useRef(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
+
+  const searchWords = useMemo(() => {
+    if (!searchQuery?.trim()) return [];
+    return searchQuery.trim().toLowerCase().split(/\s+/);
+  }, [searchQuery]);
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
@@ -65,6 +88,8 @@ function SessionView(props: SessionViewProps) {
     mountedRef.current = true;
     setLoading(true);
     setMessages([]);
+    setAutoScroll(!searchQuery?.trim());
+    hasScrolledToMatchRef.current = false;
     offsetRef.current = 0;
     retryCountRef.current = 0;
     connect();
@@ -85,8 +110,22 @@ function SessionView(props: SessionViewProps) {
   }, []);
 
   useEffect(() => {
+    if (searchWords.length > 0 && !hasScrolledToMatchRef.current && messages.length > 0) {
+      requestAnimationFrame(() => {
+        if (firstMatchRef.current) {
+          hasScrolledToMatchRef.current = true;
+          isScrollingProgrammaticallyRef.current = true;
+          firstMatchRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+          setTimeout(() => {
+            isScrollingProgrammaticallyRef.current = false;
+          }, 500);
+        }
+      });
+      return;
+    }
+
     if (autoScroll) scrollToBottom();
-  }, [messages, autoScroll, scrollToBottom]);
+  }, [messages, autoScroll, scrollToBottom, searchWords]);
 
   const handleScroll = () => {
     if (!containerRef.current || isScrollingProgrammaticallyRef.current) return;
@@ -128,18 +167,25 @@ function SessionView(props: SessionViewProps) {
           )}
 
           <div className="flex flex-col gap-2">
-            {conversationMessages.map((message, index) => (
-              <div
-                key={message.uuid || index}
-                ref={
-                  index === conversationMessages.length - 1
-                    ? lastMessageRef
-                    : undefined
-                }
-              >
-                <MessageBlock message={message} />
-              </div>
-            ))}
+            {conversationMessages.map((message, index) => {
+              const isMatch = searchWords.length > 0 && messageMatchesQuery(message, searchWords);
+              const isFirstMatch = isMatch && !conversationMessages.slice(0, index).some((m) => messageMatchesQuery(m, searchWords));
+              return (
+                <div
+                  key={message.uuid || index}
+                  ref={
+                    isFirstMatch
+                      ? firstMatchRef
+                      : index === conversationMessages.length - 1
+                        ? lastMessageRef
+                        : undefined
+                  }
+                  className={isMatch ? "ring-2 ring-yellow-400 dark:ring-yellow-500/60 rounded-2xl" : ""}
+                >
+                  <MessageBlock message={message} searchHighlight={searchWords} />
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

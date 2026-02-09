@@ -68,6 +68,7 @@ function App() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedSource, setSelectedSource] = useState<SessionSource | null>(null);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -162,6 +163,10 @@ function App() {
     setSelectedSession(sessionId);
   }, []);
 
+  const handleSearchQueryChange = useCallback((query: string) => {
+    setSearchQuery(query);
+  }, []);
+
   return (
     <div className="flex h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100">
       {!sidebarCollapsed && (
@@ -193,6 +198,7 @@ function App() {
             loading={loading}
             selectedSource={selectedSource}
             onSelectSource={setSelectedSource}
+            onSearchQueryChange={handleSearchQueryChange}
           />
         </aside>
       )}
@@ -229,7 +235,7 @@ function App() {
         </div>
         <div className="flex-1 overflow-hidden">
           {selectedSession ? (
-            <SessionView sessionId={selectedSession} />
+            <SessionView sessionId={selectedSession} searchQuery={searchQuery} />
           ) : (
             <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600">
               <div className="text-center">

@@ -253,7 +253,7 @@ export function createServer(options: ServerOptions) {
       const sessions = await getSessions();
       const session = sessions.find((s) => s.id === sessionId);
       if (session) {
-        indexSession(sessionId, source, session.display, session.project, content);
+        indexSession(sessionId, source, session.display, session.project, content, session.timestamp);
       }
     } catch { /* ignore indexing errors */ }
   });
@@ -275,7 +275,7 @@ export function createServer(options: ServerOptions) {
         const session = sessionMap.get(id);
         if (!session) continue;
         const content = await getAllSessionContent(id);
-        indexSession(id, session.source, session.display, session.project, content);
+        indexSession(id, session.source, session.display, session.project, content, session.timestamp);
       } catch { /* skip */ }
     }
   }
@@ -307,7 +307,7 @@ export function createServer(options: ServerOptions) {
             if (isSessionIndexed(session.id)) continue;
             try {
               const content = await getAllSessionContent(session.id);
-              indexSession(session.id, session.source, session.display, session.project, content);
+              indexSession(session.id, session.source, session.display, session.project, content, session.timestamp);
               indexed++;
               if (indexed % 50 === 0) {
                 console.log(`  Indexed ${indexed}/${sessions.length} sessions...`);

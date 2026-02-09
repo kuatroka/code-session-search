@@ -20,7 +20,7 @@ import {
   Bot,
 } from "lucide-react";
 import { sanitizeText } from "../utils";
-import { MarkdownRenderer } from "./markdown-renderer";
+import { MarkdownRenderer, highlightText } from "./markdown-renderer";
 import {
   TodoRenderer,
   EditRenderer,
@@ -38,6 +38,7 @@ import {
 
 interface MessageBlockProps {
   message: ConversationMessage;
+  searchHighlight?: string[];
 }
 
 function buildToolMap(content: ContentBlock[]): Map<string, string> {
@@ -51,7 +52,7 @@ function buildToolMap(content: ContentBlock[]): Map<string, string> {
 }
 
 const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
-  const { message } = props;
+  const { message, searchHighlight } = props;
 
   const isUser = message.type === "user";
   const content = message.message?.content;
@@ -112,15 +113,15 @@ const MessageBlock = memo(function MessageBlock(props: MessageBlockProps) {
           {typeof content === "string" ? (
             isUser ? (
               <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">
-                {sanitizeText(content)}
+                {searchHighlight?.length ? highlightText(sanitizeText(content), searchHighlight) : sanitizeText(content)}
               </div>
             ) : (
-              <MarkdownRenderer content={sanitizeText(content)} />
+              <MarkdownRenderer content={sanitizeText(content)} highlightWords={searchHighlight} />
             )
           ) : (
             <div className="flex flex-col gap-1">
               {visibleTextBlocks.map((block, index) => (
-                <ContentBlockRenderer key={index} block={block} isUser={isUser} toolMap={toolMap} />
+                <ContentBlockRenderer key={index} block={block} isUser={isUser} toolMap={toolMap} searchHighlight={searchHighlight} />
               ))}
             </div>
           )}
@@ -142,6 +143,7 @@ interface ContentBlockRendererProps {
   block: ContentBlock;
   isUser?: boolean;
   toolMap?: Map<string, string>;
+  searchHighlight?: string[];
 }
 
 const TOOL_ICONS: Record<string, typeof Wrench> = {
@@ -296,7 +298,7 @@ function ToolResultRenderer(props: ToolResultRendererProps) {
 }
 
 function ContentBlockRenderer(props: ContentBlockRendererProps) {
-  const { block, isUser, toolMap } = props;
+  const { block, isUser, toolMap, searchHighlight } = props;
   const [expanded, setExpanded] = useState(false);
 
   if (block.type === "text" && block.text) {
@@ -305,11 +307,11 @@ function ContentBlockRenderer(props: ContentBlockRendererProps) {
     if (isUser) {
       return (
         <div className="whitespace-pre-wrap break-words text-[13px] leading-relaxed">
-          {sanitized}
+          {searchHighlight?.length ? highlightText(sanitized, searchHighlight) : sanitized}
         </div>
       );
     }
-    return <MarkdownRenderer content={sanitized} />;
+    return <MarkdownRenderer content={sanitized} highlightWords={searchHighlight} />;
   }
 
   if (block.type === "thinking" && block.thinking) {

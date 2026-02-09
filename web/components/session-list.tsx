@@ -10,6 +10,7 @@ interface SearchResult {
   project: string;
   snippet: string;
   rank: number;
+  timestamp: number;
 }
 
 const SOURCE_COLORS: Record<SessionSource, string> = {
@@ -32,10 +33,11 @@ interface SessionListProps {
   loading?: boolean;
   selectedSource: SessionSource | null;
   onSelectSource: (source: SessionSource | null) => void;
+  onSearchQueryChange?: (query: string) => void;
 }
 
 const SessionList = memo(function SessionList(props: SessionListProps) {
-  const { sessions, selectedSession, onSelectSession, loading, selectedSource, onSelectSource } = props;
+  const { sessions, selectedSession, onSelectSession, loading, selectedSource, onSelectSource, onSearchQueryChange } = props;
   const [search, setSearch] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -61,6 +63,10 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
       setSearching(false);
     }
   }, []);
+
+  useEffect(() => {
+    onSearchQueryChange?.(search);
+  }, [search, onSearchQueryChange]);
 
   useEffect(() => {
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
@@ -203,8 +209,9 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                         {result.project.split("/").pop() || result.project}
                       </span>
                     </div>
-                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600 capitalize">
-                      {result.source}
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600">
+                      {result.timestamp ? formatTime(result.timestamp) : ""}{" "}
+                      <span className="capitalize">{result.source}</span>
                     </span>
                   </div>
                   <p className="text-[12px] text-zinc-700 dark:text-zinc-300 leading-snug line-clamp-1 break-words mb-1">
