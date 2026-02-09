@@ -32,6 +32,8 @@ import {
   indexSession,
   isSessionIndexed,
   closeSearchDb,
+  markSessionDirty,
+  getDirtySessions,
 } from "./search";
 import { join } from "path";
 import { existsSync } from "fs";
@@ -245,6 +247,7 @@ export function createServer(options: ServerOptions) {
 
   onSessionChange(async (sessionId: string, filePath: string, source: SessionSource) => {
     addToFileIndex(sessionId, filePath, source);
+    markSessionDirty(sessionId);
     try {
       const content = await getAllSessionContent(sessionId);
       const sessions = await getSessions();
@@ -258,6 +261,24 @@ export function createServer(options: ServerOptions) {
   startWatcher();
 
   let httpServer: ReturnType<typeof Bun.serve> | null = null;
+  let reindexInterval: ReturnType<typeof setInterval> | null = null;
+
+  async function reindexDirtySessions(): Promise<void> {
+    const dirtyIds = getDirtySessions();
+    if (dirtyIds.length === 0) return;
+
+    const sessions = await getSessions();
+    const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+
+    for (const id of dirtyIds) {
+      try {
+        const session = sessionMap.get(id);
+        if (!session) continue;
+        const content = await getAllSessionContent(id);
+        indexSession(id, session.source, session.display, session.project, content);
+      } catch { /* skip */ }
+    }
+  }
 
   return {
     app,
@@ -301,9 +322,17 @@ export function createServer(options: ServerOptions) {
         }
       })();
 
+      reindexInterval = setInterval(() => {
+        reindexDirtySessions().catch(() => {});
+      }, 30_000);
+
       return httpServer;
     },
     stop: () => {
+      if (reindexInterval) {
+        clearInterval(reindexInterval);
+        reindexInterval = null;
+      }
       stopWatcher();
       closeSearchDb();
       if (httpServer) {

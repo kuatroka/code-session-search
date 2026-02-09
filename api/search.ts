@@ -111,6 +111,18 @@ export function isSessionIndexed(sessionId: string): boolean {
   return !!result;
 }
 
+const dirtySessionIds = new Set<string>();
+
+export function markSessionDirty(sessionId: string): void {
+  dirtySessionIds.add(sessionId);
+}
+
+export function getDirtySessions(): string[] {
+  const ids = [...dirtySessionIds];
+  dirtySessionIds.clear();
+  return ids;
+}
+
 export function closeSearchDb(): void {
   if (db) {
     db.close();
