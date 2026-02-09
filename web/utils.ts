@@ -4,7 +4,6 @@ export function formatTime(timestamp: number): string {
   const diffMs = now.getTime() - date.getTime();
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
 
   if (diffMins < 1) {
     return "Just now";
@@ -15,10 +14,17 @@ export function formatTime(timestamp: number): string {
   if (diffHours < 24) {
     return `${diffHours}h`;
   }
-  if (diffDays < 7) {
-    return `${diffDays}d`;
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const mins = pad(date.getMinutes());
+
+  if (date.getFullYear() === now.getFullYear()) {
+    return `${month}/${day} ${hours}:${mins}`;
   }
-  return date.toLocaleDateString();
+  return `${date.getFullYear()}/${month}/${day} ${hours}:${mins}`;
 }
 
 const SANITIZE_PATTERNS = [
