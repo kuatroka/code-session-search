@@ -6,7 +6,23 @@ interface TodoItem {
 }
 
 interface TodoRendererProps {
-  todos: TodoItem[];
+  todos: TodoItem[] | string;
+}
+
+function parseTodosString(text: string): TodoItem[] {
+  return text
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => {
+      const statusMatch = line.match(/\[(completed|in_progress|pending)\]/);
+      const status = (statusMatch?.[1] as TodoItem["status"]) || "pending";
+      const content = line
+        .replace(/^\d+\.\s*/, "")
+        .replace(/\[(completed|in_progress|pending)\]\s*/, "")
+        .trim();
+      return { content, status };
+    })
+    .filter((t) => t.content.length > 0);
 }
 
 function getStatusIcon(status: string) {
@@ -30,11 +46,17 @@ function getStatusClass(status: string) {
 }
 
 export function TodoRenderer(props: TodoRendererProps) {
-  const { todos } = props;
+  const rawTodos = props.todos;
 
-  if (!todos || todos.length === 0) {
+  if (!rawTodos || (typeof rawTodos !== "string" && rawTodos.length === 0)) {
     return null;
   }
+
+  const todos: TodoItem[] = typeof rawTodos === "string"
+    ? parseTodosString(rawTodos)
+    : rawTodos;
+
+  if (todos.length === 0) return null;
 
   const completedCount = todos.filter((t) => t.status === "completed").length;
   const totalCount = todos.length;

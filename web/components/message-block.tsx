@@ -219,7 +219,7 @@ function ToolInputRenderer(props: ToolInputRendererProps) {
   const name = toolName.toLowerCase();
 
   if (name === "todowrite" && input.todos) {
-    return <TodoRenderer todos={input.todos as Array<{ content: string; status: "pending" | "in_progress" | "completed" }>} />;
+    return <TodoRenderer todos={input.todos as Array<{ content: string; status: "pending" | "in_progress" | "completed" }> | string} />;
   }
   if (name === "edit" && input.file_path) {
     return <EditRenderer input={input as { file_path: string; old_string: string; new_string: string }} />;
