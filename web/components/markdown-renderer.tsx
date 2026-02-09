@@ -5,14 +5,43 @@ import { CopyButton } from "./tool-renderers";
 
 const MARK_CLASS = "search-highlight";
 
+function naiveStem(word: string): string {
+  let w = word.toLowerCase();
+  // Strip common English suffixes to approximate porter stemming.
+  // Order matters: longest suffixes first.
+  const suffixes = ["ation", "ment", "ness", "ting", "ning", "ing", "ied", "ies", "ous", "ive", "ion", "ers", "est", "ble", "ing", "ful", "ant", "ent", "ly", "ed", "er", "es", "al", "en", "ty", "ry", "or", "ar", "le", "s"];
+  for (const s of suffixes) {
+    if (w.length > s.length + 2 && w.endsWith(s)) {
+      w = w.slice(0, -s.length);
+      break;
+    }
+  }
+  return w;
+}
+
+function buildHighlightRegex(words: string[]): RegExp | null {
+  if (words.length === 0) return null;
+  const patterns: string[] = [];
+  for (const w of words) {
+    const stem = naiveStem(w);
+    const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    patterns.push(`${esc}\\w*`);
+  }
+  try {
+    return new RegExp(`\\b(${patterns.join("|")})`, "gi");
+  } catch {
+    return null;
+  }
+}
+
 export function highlightText(text: string, words: string[]): ReactNode {
   if (words.length === 0) return text;
-  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+  const regex = buildHighlightRegex(words);
+  if (!regex) return text;
   const parts = text.split(regex);
   if (parts.length === 1) return text;
   return parts.map((part, i) =>
-    regex.test(part) ? (
+    i % 2 === 1 ? (
       <mark key={i} className={MARK_CLASS}>
         {part}
       </mark>

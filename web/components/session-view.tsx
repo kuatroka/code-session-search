@@ -22,10 +22,29 @@ function getMessageText(message: ConversationMessage): string {
     .join(" ");
 }
 
+function naiveStem(word: string): string {
+  let w = word.toLowerCase();
+  const suffixes = ["ation", "ment", "ness", "ting", "ning", "ing", "ied", "ies", "ous", "ive", "ion", "ers", "est", "ble", "ing", "ful", "ant", "ent", "ly", "ed", "er", "es", "al", "en", "ty", "ry", "or", "ar", "le", "s"];
+  for (const s of suffixes) {
+    if (w.length > s.length + 2 && w.endsWith(s)) {
+      w = w.slice(0, -s.length);
+      break;
+    }
+  }
+  return w;
+}
+
 function messageMatchesQuery(message: ConversationMessage, words: string[]): boolean {
   if (words.length === 0) return false;
   const text = getMessageText(message).toLowerCase();
-  return words.every((w) => text.includes(w));
+  return words.every((w) => {
+    const stem = naiveStem(w);
+    try {
+      return new RegExp(`\\b${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\w*`, "i").test(text);
+    } catch {
+      return text.includes(w);
+    }
+  });
 }
 
 function SessionView(props: SessionViewProps) {
@@ -43,6 +62,7 @@ function SessionView(props: SessionViewProps) {
   const retryCountRef = useRef(0);
   const eventSourceRef = useRef<EventSource | null>(null);
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const retryTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mountedRef = useRef(true);
 
   const searchWords = useMemo(() => {
@@ -96,6 +116,7 @@ function SessionView(props: SessionViewProps) {
     return () => {
       mountedRef.current = false;
       if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       if (eventSourceRef.current) eventSourceRef.current.close();
     };
   }, [connect]);
@@ -109,26 +130,68 @@ function SessionView(props: SessionViewProps) {
     });
   }, []);
 
+  // Auto-scroll to the first search match.
+  // Uses MutationObserver + polling fallback to handle React render timing.
   useEffect(() => {
-    if (searchWords.length > 0 && !hasScrolledToMatchRef.current && messages.length > 0) {
-      // Wait for DOM to render highlights, then scroll to the first <mark>
-      const timer = setTimeout(() => {
-        if (hasScrolledToMatchRef.current) return;
-        const markEl = containerRef.current?.querySelector("mark");
-        const target = markEl || firstMatchRef.current;
-        if (target) {
-          hasScrolledToMatchRef.current = true;
-          isScrollingProgrammaticallyRef.current = true;
-          target.scrollIntoView({ behavior: "smooth", block: "center" });
-          setTimeout(() => {
-            isScrollingProgrammaticallyRef.current = false;
-          }, 500);
-        }
-      }, 150);
-      return () => clearTimeout(timer);
+    if (searchWords.length === 0 || messages.length === 0) {
+      if (autoScroll) scrollToBottom();
+      return;
     }
+    if (hasScrolledToMatchRef.current) return;
 
-    if (autoScroll) scrollToBottom();
+    const container = containerRef.current;
+    if (!container) return;
+
+    const scrollToFirstMatch = (): boolean => {
+      if (hasScrolledToMatchRef.current) return true;
+      // Priority 1: scroll to a <mark> highlight inside the content area
+      const mark = container.querySelector("mark.search-highlight");
+      // Priority 2: scroll to the ring-highlighted message div
+      const ring = container.querySelector(".ring-2");
+      const target = mark || ring;
+      if (!target) return false;
+
+      hasScrolledToMatchRef.current = true;
+      isScrollingProgrammaticallyRef.current = true;
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => { isScrollingProgrammaticallyRef.current = false; }, 600);
+      return true;
+    };
+
+    // Try immediately (content may already be rendered)
+    if (scrollToFirstMatch()) return;
+
+    // Watch for DOM changes (React rendering marks/rings)
+    let observer: MutationObserver | null = null;
+    observer = new MutationObserver(() => {
+      if (scrollToFirstMatch() && observer) {
+        observer.disconnect();
+        observer = null;
+      }
+    });
+    observer.observe(container, { childList: true, subtree: true });
+
+    // Polling fallback (in case MutationObserver misses it, e.g. mark added
+    // via text replacement that doesn't trigger childList)
+    let attempt = 0;
+    const maxAttempts = 20;
+    const poll = () => {
+      if (hasScrolledToMatchRef.current) return;
+      attempt++;
+      if (scrollToFirstMatch()) {
+        if (observer) { observer.disconnect(); observer = null; }
+        return;
+      }
+      if (attempt < maxAttempts) {
+        retryTimerRef.current = setTimeout(poll, 300);
+      }
+    };
+    retryTimerRef.current = setTimeout(poll, 200);
+
+    return () => {
+      if (observer) { observer.disconnect(); observer = null; }
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
   }, [messages, autoScroll, scrollToBottom, searchWords]);
 
   const handleScroll = () => {

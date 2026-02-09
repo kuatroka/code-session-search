@@ -684,6 +684,24 @@ export function getSessionSource(sessionId: string): SessionSource {
   return entry?.source ?? "claude";
 }
 
+const SANITIZE_PATTERNS = [
+  /<command-name>[^<]*<\/command-name>/g,
+  /<command-message>[^<]*<\/command-message>/g,
+  /<command-args>[^<]*<\/command-args>/g,
+  /<local-command-stdout>[^<]*<\/local-command-stdout>/g,
+  /<system-reminder>[\s\S]*?<\/system-reminder>/g,
+  /<system-notification>[\s\S]*?<\/system-notification>/g,
+  /^\s*Caveat:.*?unless the user explicitly asks you to\./s,
+];
+
+function sanitizeForIndex(text: string): string {
+  let result = text;
+  for (const pattern of SANITIZE_PATTERNS) {
+    result = result.replace(pattern, "");
+  }
+  return result.trim();
+}
+
 export function getAllSessionContent(sessionId: string): Promise<string> {
   return dedupe(`content:${sessionId}`, async () => {
     const messages = await getConversation(sessionId);
@@ -692,10 +710,14 @@ export function getAllSessionContent(sessionId: string): Promise<string> {
       if (!msg.message) continue;
       const content = msg.message.content;
       if (typeof content === "string") {
-        parts.push(content);
+        const cleaned = sanitizeForIndex(content);
+        if (cleaned) parts.push(cleaned);
       } else if (Array.isArray(content)) {
         for (const block of content) {
-          if (block.type === "text" && block.text) parts.push(block.text);
+          if (block.type === "text" && block.text) {
+            const cleaned = sanitizeForIndex(block.text);
+            if (cleaned) parts.push(cleaned);
+          }
           if (block.type === "thinking" && block.thinking) parts.push(block.thinking);
         }
       }
