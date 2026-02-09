@@ -261,7 +261,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                     {result.display}
                   </p>
                   <p
-                    className="text-[11px] text-zinc-500 dark:text-zinc-500 leading-snug line-clamp-2 break-words [&_mark]:bg-yellow-200 dark:[&_mark]:bg-yellow-500/30 [&_mark]:text-zinc-900 dark:[&_mark]:text-zinc-100 [&_mark]:rounded-sm [&_mark]:px-0.5"
+                    className="text-[11px] text-zinc-500 dark:text-zinc-500 leading-snug line-clamp-2 break-words"
                     dangerouslySetInnerHTML={{ __html: result.snippet }}
                   />
                 </button>

@@ -184,7 +184,7 @@ function SessionView(props: SessionViewProps) {
                         ? lastMessageRef
                         : undefined
                   }
-                  className={isMatch ? "ring-2 ring-yellow-400 dark:ring-yellow-500/60 rounded-2xl" : ""}
+                  className={isMatch ? "ring-2 ring-orange-400 dark:ring-orange-500/60 rounded-2xl" : ""}
                 >
                   <MessageBlock message={message} searchHighlight={searchWords} />
                 </div>

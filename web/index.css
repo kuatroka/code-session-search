@@ -99,3 +99,17 @@ select option {
   background: #18181b;
   color: #e4e4e7;
 }
+
+mark.search-highlight {
+  background: #f97316;
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 2px;
+  box-shadow: 0 0 0 1px #f97316;
+}
+
+.dark mark.search-highlight {
+  background: #ea580c;
+  color: #fff;
+  box-shadow: 0 0 0 1px #ea580c;
+}

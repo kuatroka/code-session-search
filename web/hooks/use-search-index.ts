@@ -45,7 +45,7 @@ function buildSnippet(content: string, query: string, words: string[]): string {
   // Wrap matching words in <mark>
   const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   const regex = new RegExp(`(${escaped.join("|")})`, "gi");
-  snippet = snippet.replace(regex, "<mark>$1</mark>");
+  snippet = snippet.replace(regex, '<mark class="search-highlight">$1</mark>');
 
   return snippet;
 }
