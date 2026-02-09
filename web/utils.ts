@@ -22,15 +22,15 @@ export function formatTime(timestamp: number): string {
   }
 
   const pad = (n: number) => String(n).padStart(2, "0");
-  const month = pad(date.getMonth() + 1);
   const day = pad(date.getDate());
+  const month = pad(date.getMonth() + 1);
   const hours = pad(date.getHours());
   const mins = pad(date.getMinutes());
 
   if (date.getFullYear() === now.getFullYear()) {
-    return `${month}/${day} ${hours}:${mins}`;
+    return `${day}/${month} ${hours}:${mins}`;
   }
-  return `${date.getFullYear()}/${month}/${day} ${hours}:${mins}`;
+  return `${day}/${month}/${date.getFullYear()} ${hours}:${mins}`;
 }
 
 const SANITIZE_PATTERNS = [

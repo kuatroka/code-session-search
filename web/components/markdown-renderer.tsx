@@ -115,25 +115,25 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
                 rel="noopener noreferrer"
                 className="text-cyan-600 dark:text-cyan-400 hover:text-cyan-500 dark:hover:text-cyan-300 underline underline-offset-2"
               >
-                {children}
+                {hl(children)}
               </a>
             );
           },
           strong: (props) => {
             const { children } = props;
             return (
-              <strong className="font-semibold text-zinc-900 dark:text-zinc-50">{children}</strong>
+              <strong className="font-semibold text-zinc-900 dark:text-zinc-50">{hl(children)}</strong>
             );
           },
           em: (props) => {
             const { children } = props;
-            return <em className="italic text-zinc-800 dark:text-zinc-200">{children}</em>;
+            return <em className="italic text-zinc-800 dark:text-zinc-200">{hl(children)}</em>;
           },
           code: (props) => {
             const { children } = props;
             return (
               <code className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800/80 text-cyan-700 dark:text-cyan-300 text-[12px] font-mono">
-                {children}
+                {hl(children)}
               </code>
             );
           },
@@ -156,7 +156,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
                     <CopyButton text={codeContent} />
                   </div>
                   <pre className="text-xs text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-900/80 p-3 overflow-x-auto rounded-t-none!">
-                    <code>{codeContent}</code>
+                    <code>{hw.length ? highlightText(codeContent, hw) : codeContent}</code>
                   </pre>
                 </div>
               );
@@ -191,7 +191,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer(
             const { children } = props;
             return (
               <div className="border-l-2 border-zinc-300 dark:border-zinc-600 pl-3 my-2 text-zinc-500 dark:text-zinc-400 italic">
-                {children}
+                {hl(children)}
               </div>
             );
           },

@@ -111,17 +111,21 @@ function SessionView(props: SessionViewProps) {
 
   useEffect(() => {
     if (searchWords.length > 0 && !hasScrolledToMatchRef.current && messages.length > 0) {
-      requestAnimationFrame(() => {
-        if (firstMatchRef.current) {
+      // Wait for DOM to render highlights, then scroll to the first <mark>
+      const timer = setTimeout(() => {
+        if (hasScrolledToMatchRef.current) return;
+        const markEl = containerRef.current?.querySelector("mark");
+        const target = markEl || firstMatchRef.current;
+        if (target) {
           hasScrolledToMatchRef.current = true;
           isScrollingProgrammaticallyRef.current = true;
-          firstMatchRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
           setTimeout(() => {
             isScrollingProgrammaticallyRef.current = false;
           }, 500);
         }
-      });
-      return;
+      }, 150);
+      return () => clearTimeout(timer);
     }
 
     if (autoScroll) scrollToBottom();
