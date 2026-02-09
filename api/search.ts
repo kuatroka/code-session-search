@@ -15,7 +15,7 @@ export interface SearchResult {
 let db: Database | null = null;
 
 export function initSearchDb(): void {
-  const dbDir = join(homedir(), ".claude-run");
+  const dbDir = join(homedir(), ".claude-run-plus");
   if (!existsSync(dbDir)) {
     mkdirSync(dbDir, { recursive: true });
   }

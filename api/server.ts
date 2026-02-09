@@ -267,7 +267,7 @@ export function createServer(options: ServerOptions) {
       initSearchDb();
 
       const openUrl = `http://localhost:${dev ? 12000 : port}/`;
-      console.log(`\n  claude-run is running at ${openUrl}\n`);
+      console.log(`\n  claude-run-plus is running at ${openUrl}\n`);
       if (!dev && shouldOpen) {
         open(openUrl).catch(console.error);
       }

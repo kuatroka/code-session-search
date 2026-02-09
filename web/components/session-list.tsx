@@ -1,6 +1,6 @@
 import { useState, useMemo, memo, useRef, useEffect, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import type { Session, SessionSource } from "@claude-run/api";
+import type { Session, SessionSource } from "@claude-run-plus/api";
 import { formatTime } from "../utils";
 
 interface SearchResult {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import type { Session, SessionSource } from "@claude-run/api";
+import type { Session, SessionSource } from "@claude-run-plus/api";
 import { PanelLeft, Copy, Check, Sun, Moon } from "lucide-react";
 import { formatTime } from "./utils";
 import SessionList from "./components/session-list";
@@ -73,14 +73,14 @@ function App() {
   const [copied, setCopied] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof window !== "undefined") {
-      return (localStorage.getItem("claude-run-theme") as "light" | "dark") || "dark";
+      return (localStorage.getItem("claude-run-plus-theme") as "light" | "dark") || "dark";
     }
     return "dark";
   });
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("claude-run-theme", theme);
+    localStorage.setItem("claude-run-plus-theme", theme);
   }, [theme]);
 
   const handleCopyResumeCommand = useCallback(
