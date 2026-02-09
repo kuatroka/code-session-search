@@ -689,6 +689,7 @@ const SANITIZE_PATTERNS = [
   /<command-message>[^<]*<\/command-message>/g,
   /<command-args>[^<]*<\/command-args>/g,
   /<local-command-stdout>[^<]*<\/local-command-stdout>/g,
+  /<local-command-caveat>[\s\S]*?<\/local-command-caveat>/g,
   /<system-reminder>[\s\S]*?<\/system-reminder>/g,
   /<system-notification>[\s\S]*?<\/system-notification>/g,
   /^\s*Caveat:.*?unless the user explicitly asks you to\./s,
@@ -718,7 +719,6 @@ export function getAllSessionContent(sessionId: string): Promise<string> {
             const cleaned = sanitizeForIndex(block.text);
             if (cleaned) parts.push(cleaned);
           }
-          if (block.type === "thinking" && block.thinking) parts.push(block.thinking);
         }
       }
     }

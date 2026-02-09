@@ -1,7 +1,9 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { ChevronUp, ChevronDown } from "lucide-react";
 import type { ConversationMessage } from "@claude-run-plus/api";
 import MessageBlock from "./message-block";
 import ScrollToBottomButton from "./scroll-to-bottom-button";
+import { sanitizeText } from "../utils";
 
 const MAX_RETRIES = 10;
 const BASE_RETRY_DELAY_MS = 1000;
@@ -16,9 +18,10 @@ interface SessionViewProps {
 function getMessageText(message: ConversationMessage): string {
   const content = message.message?.content;
   if (!content) return "";
-  if (typeof content === "string") return content;
+  if (typeof content === "string") return sanitizeText(content);
   return content
-    .map((b) => b.text || b.thinking || "")
+    .filter((b) => b.type === "text" && !!b.text)
+    .map((b) => sanitizeText(b.text || ""))
     .join(" ");
 }
 
@@ -53,6 +56,8 @@ function SessionView(props: SessionViewProps) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [matchCount, setMatchCount] = useState(0);
+  const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastMessageRef = useRef<HTMLDivElement>(null);
   const firstMatchRef = useRef<HTMLDivElement>(null);
@@ -144,15 +149,15 @@ function SessionView(props: SessionViewProps) {
 
     const scrollToFirstMatch = (): boolean => {
       if (hasScrolledToMatchRef.current) return true;
-      // Priority 1: scroll to a <mark> highlight inside the content area
       const mark = container.querySelector("mark.search-highlight");
-      // Priority 2: scroll to the ring-highlighted message div
       const ring = container.querySelector(".ring-2");
       const target = mark || ring;
       if (!target) return false;
 
       hasScrolledToMatchRef.current = true;
       isScrollingProgrammaticallyRef.current = true;
+      if (mark) mark.classList.add("search-highlight-active");
+      setCurrentMatchIdx(0);
       target.scrollIntoView({ behavior: "smooth", block: "center" });
       setTimeout(() => { isScrollingProgrammaticallyRef.current = false; }, 600);
       return true;
@@ -193,6 +198,47 @@ function SessionView(props: SessionViewProps) {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
     };
   }, [messages, autoScroll, scrollToBottom, searchWords]);
+
+  // Count <mark> elements whenever messages or search changes
+  useEffect(() => {
+    if (searchWords.length === 0) {
+      setMatchCount(0);
+      setCurrentMatchIdx(0);
+      return;
+    }
+    // Wait for render then count
+    const timer = setTimeout(() => {
+      const marks = containerRef.current?.querySelectorAll("mark.search-highlight");
+      setMatchCount(marks?.length || 0);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [messages, searchWords]);
+
+  const scrollToMatch = useCallback((idx: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const marks = container.querySelectorAll("mark.search-highlight");
+    if (idx < 0 || idx >= marks.length) return;
+
+    // Remove active class from all, add to current
+    marks.forEach((m) => m.classList.remove("search-highlight-active"));
+    marks[idx].classList.add("search-highlight-active");
+
+    setCurrentMatchIdx(idx);
+    isScrollingProgrammaticallyRef.current = true;
+    marks[idx].scrollIntoView({ behavior: "smooth", block: "center" });
+    setTimeout(() => { isScrollingProgrammaticallyRef.current = false; }, 600);
+  }, []);
+
+  const goToNextMatch = useCallback(() => {
+    if (matchCount === 0) return;
+    scrollToMatch(currentMatchIdx < matchCount - 1 ? currentMatchIdx + 1 : 0);
+  }, [matchCount, currentMatchIdx, scrollToMatch]);
+
+  const goToPrevMatch = useCallback(() => {
+    if (matchCount === 0) return;
+    scrollToMatch(currentMatchIdx > 0 ? currentMatchIdx - 1 : matchCount - 1);
+  }, [matchCount, currentMatchIdx, scrollToMatch]);
 
   const handleScroll = () => {
     if (!containerRef.current || isScrollingProgrammaticallyRef.current) return;
@@ -256,6 +302,28 @@ function SessionView(props: SessionViewProps) {
           </div>
         </div>
       </div>
+
+      {searchWords.length > 0 && matchCount > 0 && (
+        <div className="absolute top-2 right-6 z-10 flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100/90 dark:bg-zinc-800/90 border border-zinc-300 dark:border-zinc-700 shadow-sm backdrop-blur-sm">
+          <span className="text-[11px] text-zinc-600 dark:text-zinc-400 tabular-nums px-1">
+            {currentMatchIdx + 1} / {matchCount}
+          </span>
+          <button
+            onClick={goToPrevMatch}
+            className="p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+            aria-label="Previous match"
+          >
+            <ChevronUp className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
+          </button>
+          <button
+            onClick={goToNextMatch}
+            className="p-0.5 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+            aria-label="Next match"
+          >
+            <ChevronDown className="w-3.5 h-3.5 text-zinc-600 dark:text-zinc-400" />
+          </button>
+        </div>
+      )}
 
       {!autoScroll && (
         <ScrollToBottomButton

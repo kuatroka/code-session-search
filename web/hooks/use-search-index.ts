@@ -60,11 +60,17 @@ async function upsertEntry(run: RunFn, e: SearchIndexEntry): Promise<void> {
 }
 
 function buildFtsQuery(query: string): string {
-  return query
-    .trim()
-    .split(/\s+/)
-    .map((w) => `"${w.replace(/"/g, '""')}"`)
-    .join(" ");
+  const tokens = query
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]+/gu)
+    ?.filter(Boolean) || [];
+
+  if (tokens.length === 0) {
+    const fallback = query.trim();
+    return fallback ? `"${fallback.replace(/"/g, '""')}"` : "";
+  }
+
+  return tokens.map((w) => `"${w.replace(/"/g, '""')}"`).join(" ");
 }
 
 export function useSearchIndex() {
@@ -125,7 +131,7 @@ export function useSearchIndex() {
         source,
         display,
         project,
-        snippet(sessions_fts, 4, '<mark class="search-highlight">', '</mark>', '...', 40) as snippet,
+        snippet(sessions_fts, -1, '<mark class="search-highlight">', '</mark>', '...', 24) as snippet,
         CAST(session_timestamp AS TEXT) as timestamp,
         bm25(sessions_fts, 0, 0, 5.0, 3.0, 10.0, 0) as rank
       FROM sessions_fts

@@ -113,3 +113,13 @@ mark.search-highlight {
   color: #fff;
   box-shadow: 0 0 0 1px #ea580c;
 }
+
+mark.search-highlight-active {
+  background: #dc2626;
+  box-shadow: 0 0 0 2px #dc2626, 0 0 6px 1px rgba(220, 38, 38, 0.4);
+}
+
+.dark mark.search-highlight-active {
+  background: #dc2626;
+  box-shadow: 0 0 0 2px #dc2626, 0 0 6px 1px rgba(220, 38, 38, 0.4);
+}
