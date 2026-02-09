@@ -36,10 +36,18 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
   const resultRefsMap = useRef<Map<number, HTMLButtonElement>>(new Map());
 
   const { search: clientSearch, ready: searchReady } = useSearchIndex();
+  const [searchResults, setSearchResults] = useState<ClientSearchResult[] | null>(null);
 
-  const searchResults = useMemo<ClientSearchResult[] | null>(() => {
-    if (!search.trim() || !searchReady) return null;
-    return clientSearch(search, selectedSource);
+  useEffect(() => {
+    if (!search.trim() || !searchReady) {
+      setSearchResults(null);
+      return;
+    }
+    let cancelled = false;
+    clientSearch(search, selectedSource).then((results) => {
+      if (!cancelled) setSearchResults(results.length > 0 ? results : []);
+    });
+    return () => { cancelled = true; };
   }, [search, selectedSource, searchReady, clientSearch]);
 
   useEffect(() => {

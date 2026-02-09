@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import uFuzzy from "@leeoniya/ufuzzy";
+import { initSQLite, useMemoryStorage } from "@subframe7536/sqlite-wasm";
 
 export interface SearchIndexEntry {
   id: string;
@@ -19,135 +19,140 @@ export interface ClientSearchResult {
   timestamp: number;
 }
 
-const SNIPPET_RADIUS = 60;
+type RunFn = (sql: string, params?: (string | number | null)[]) => Promise<Record<string, unknown>[]>;
 
-function buildSnippet(content: string, query: string, words: string[]): string {
-  const lowerContent = content.toLowerCase();
-  const lowerQuery = query.toLowerCase();
+const WASM_URL = "https://cdn.jsdelivr.net/gh/subframe7536/sqlite-wasm@v0.5.0/wa-sqlite-fts5/wa-sqlite.wasm";
 
-  // Try exact phrase first
-  let idx = lowerContent.indexOf(lowerQuery);
-  if (idx === -1 && words.length > 0) {
-    // Fall back to first word match
-    for (const w of words) {
-      idx = lowerContent.indexOf(w.toLowerCase());
-      if (idx !== -1) break;
-    }
+async function initDb(): Promise<RunFn> {
+  const { run } = await initSQLite(useMemoryStorage({ url: WASM_URL }));
+
+  await run(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
+      session_id UNINDEXED,
+      source UNINDEXED,
+      display,
+      project,
+      content,
+      session_timestamp UNINDEXED,
+      tokenize='porter unicode61'
+    )
+  `);
+
+  return run as RunFn;
+}
+
+async function populateIndex(run: RunFn, entries: SearchIndexEntry[]): Promise<void> {
+  await run("DELETE FROM sessions_fts");
+  for (const e of entries) {
+    await run(
+      "INSERT INTO sessions_fts (session_id, source, display, project, content, session_timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+      [e.id, e.source, e.display, e.project, e.content, e.timestamp]
+    );
   }
-  if (idx === -1) idx = 0;
+}
 
-  const start = Math.max(0, idx - SNIPPET_RADIUS);
-  const end = Math.min(content.length, idx + query.length + SNIPPET_RADIUS);
-  let snippet = content.slice(start, end).replace(/\n/g, " ");
-  if (start > 0) snippet = "..." + snippet;
-  if (end < content.length) snippet += "...";
+async function upsertEntry(run: RunFn, e: SearchIndexEntry): Promise<void> {
+  await run("DELETE FROM sessions_fts WHERE session_id = ?", [e.id]);
+  await run(
+    "INSERT INTO sessions_fts (session_id, source, display, project, content, session_timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+    [e.id, e.source, e.display, e.project, e.content, e.timestamp]
+  );
+}
 
-  // Wrap matching words in <mark>
-  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
-  snippet = snippet.replace(regex, '<mark class="search-highlight">$1</mark>');
-
-  return snippet;
+function buildFtsQuery(query: string): string {
+  return query
+    .trim()
+    .split(/\s+/)
+    .map((w) => `"${w.replace(/"/g, '""')}"`)
+    .join(" ");
 }
 
 export function useSearchIndex() {
   const [ready, setReady] = useState(false);
-  const entriesRef = useRef<SearchIndexEntry[]>([]);
-  const haystackRef = useRef<string[]>([]);
-  const ufRef = useRef<uFuzzy | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const runRef = useRef<RunFn | null>(null);
 
-  // Fetch full index in background
   useEffect(() => {
     let cancelled = false;
 
-    fetch("/api/search-index")
-      .then((res) => res.json())
-      .then((data: SearchIndexEntry[]) => {
+    (async () => {
+      try {
+        const run = await initDb();
         if (cancelled) return;
-        entriesRef.current = data;
-        haystackRef.current = data.map((e) => `${e.display} ${e.project} ${e.content}`);
-        ufRef.current = new uFuzzy({ intraMode: 1, intraIns: 1 });
+        runRef.current = run;
+
+        const res = await fetch("/api/search-index");
+        const data: SearchIndexEntry[] = await res.json();
+        if (cancelled) return;
+
+        await populateIndex(run, data);
+        if (cancelled) return;
         setReady(true);
-      })
-      .catch(() => {});
+      } catch (err) {
+        console.error("Search index init failed:", err);
+      }
+    })();
 
     return () => { cancelled = true; };
   }, []);
 
-  // Listen for SSE content updates
+  // SSE content updates
   useEffect(() => {
-    const es = new EventSource("/api/sessions/stream");
-    eventSourceRef.current = es;
+    if (!ready) return;
 
-    es.addEventListener("contentUpdate", (event) => {
+    const es = new EventSource("/api/sessions/stream");
+
+    es.addEventListener("contentUpdate", async (event) => {
       const update: SearchIndexEntry = JSON.parse(event.data);
-      const entries = entriesRef.current;
-      const idx = entries.findIndex((e) => e.id === update.id);
-      if (idx >= 0) {
-        entries[idx] = update;
-        haystackRef.current[idx] = `${update.display} ${update.project} ${update.content}`;
-      } else {
-        entries.push(update);
-        haystackRef.current.push(`${update.display} ${update.project} ${update.content}`);
+      if (runRef.current) {
+        try {
+          await upsertEntry(runRef.current, update);
+        } catch { /* ignore */ }
       }
     });
 
-    es.onerror = () => {
-      // Reconnect is handled by the browser's built-in EventSource retry
-    };
+    return () => es.close();
+  }, [ready]);
 
-    return () => {
-      es.close();
-      eventSourceRef.current = null;
-    };
-  }, []);
+  const search = useCallback(async (query: string, source?: string | null): Promise<ClientSearchResult[]> => {
+    const run = runRef.current;
+    if (!run || !query.trim()) return [];
 
-  const search = useCallback((query: string, source?: string | null): ClientSearchResult[] => {
-    if (!ufRef.current || !query.trim()) return [];
+    const ftsQuery = buildFtsQuery(query);
 
-    const entries = entriesRef.current;
-    const haystack = haystackRef.current;
-    const words = query.trim().split(/\s+/);
-    const exactPhrase = query.trim().toLowerCase();
+    let sql = `
+      SELECT
+        session_id as sessionId,
+        source,
+        display,
+        project,
+        snippet(sessions_fts, 4, '<mark class="search-highlight">', '</mark>', '...', 40) as snippet,
+        CAST(session_timestamp AS TEXT) as timestamp,
+        bm25(sessions_fts, 0, 0, 5.0, 3.0, 10.0, 0) as rank
+      FROM sessions_fts
+      WHERE sessions_fts MATCH ?
+    `;
+    const params: (string | number | null)[] = [ftsQuery];
 
-    // Use uFuzzy for matching
-    const [idxs, info, order] = ufRef.current.search(haystack, query.trim());
-    if (!idxs || idxs.length === 0) return [];
-
-    // Get ordered indices
-    const matchIndices = order ? order.map((o) => idxs[o]) : idxs;
-
-    const results: (ClientSearchResult & { _exact: number })[] = [];
-
-    for (const i of matchIndices) {
-      const entry = entries[i];
-      if (!entry) continue;
-      if (source && entry.source !== source) continue;
-
-      const hasExact = entry.content.toLowerCase().includes(exactPhrase);
-      const snippet = buildSnippet(entry.content, query.trim(), words);
-
-      results.push({
-        sessionId: entry.id,
-        source: entry.source,
-        display: entry.display,
-        project: entry.project,
-        snippet,
-        timestamp: entry.timestamp,
-        _exact: hasExact ? 1 : 0,
-      });
-
-      if (results.length >= 50) break;
+    if (source) {
+      sql += " AND source = ?";
+      params.push(source);
     }
 
-    // Exact phrase matches first, then by recency
-    results.sort((a, b) => {
-      if (a._exact !== b._exact) return b._exact - a._exact;
-      return b.timestamp - a.timestamp;
-    });
+    sql += " ORDER BY rank LIMIT 50";
 
-    return results.map(({ _exact, ...r }) => r);
+    try {
+      const rows = await run(sql, params);
+      return rows.map((r) => ({
+        sessionId: String(r.sessionId),
+        source: String(r.source),
+        display: String(r.display),
+        project: String(r.project),
+        snippet: String(r.snippet),
+        timestamp: Number(r.timestamp) || 0,
+      }));
+    } catch {
+      return [];
+    }
   }, []);
 
   return { search, ready };
