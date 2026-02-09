@@ -14,6 +14,12 @@ export function formatTime(timestamp: number): string {
   if (diffHours < 24) {
     return `${diffHours}h`;
   }
+  if (diffHours < 48) {
+    return "1d ago";
+  }
+  if (diffHours < 72) {
+    return "2d ago";
+  }
 
   const pad = (n: number) => String(n).padStart(2, "0");
   const month = pad(date.getMonth() + 1);
