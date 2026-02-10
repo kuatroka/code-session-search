@@ -10,9 +10,15 @@ const BASE_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30000;
 const SCROLL_THRESHOLD_PX = 100;
 
+export interface SessionModelInfo {
+  model: string;
+  provider: string;
+}
+
 interface SessionViewProps {
   sessionId: string;
   searchQuery?: string;
+  onModelChange?: (info: SessionModelInfo | null) => void;
 }
 
 function getMessageText(message: ConversationMessage): string {
@@ -50,8 +56,26 @@ function messageMatchesQuery(message: ConversationMessage, words: string[]): boo
   });
 }
 
+function extractLatestModel(messages: ConversationMessage[]): SessionModelInfo | null {
+  // Walk messages in reverse to find the latest assistant message with a model
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.type === "assistant" && msg.message?.model) {
+      const fullModel = msg.message.model;
+      // Try to derive provider from model name
+      let provider = "";
+      if (fullModel.startsWith("claude")) provider = "anthropic";
+      else if (fullModel.startsWith("gpt") || fullModel.startsWith("o1") || fullModel.startsWith("o3") || fullModel.startsWith("o4")) provider = "openai";
+      else if (fullModel.includes("gemini")) provider = "google";
+      else if (fullModel.includes("codex")) provider = "openai-codex";
+      return { model: fullModel, provider };
+    }
+  }
+  return null;
+}
+
 function SessionView(props: SessionViewProps) {
-  const { sessionId, searchQuery } = props;
+  const { sessionId, searchQuery, onModelChange } = props;
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -108,6 +132,13 @@ function SessionView(props: SessionViewProps) {
       }
     };
   }, [sessionId]);
+
+  // Report latest model to parent whenever messages change
+  useEffect(() => {
+    if (onModelChange) {
+      onModelChange(extractLatestModel(messages));
+    }
+  }, [messages, onModelChange]);
 
   useEffect(() => {
     mountedRef.current = true;

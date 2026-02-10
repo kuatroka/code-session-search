@@ -4,10 +4,65 @@ import type { Session, SessionSource } from "@claude-run-plus/api";
 import { formatTime } from "../utils";
 import type { ClientSearchResult } from "../hooks/use-search-index";
 
+interface ModelInfo {
+  model: string;
+  provider: string;
+}
+
+const modelCache = new Map<string, ModelInfo | null>();
+const pendingModelFetches = new Set<string>();
+
+function useSessionModel(sessionId: string): ModelInfo | null {
+  const [model, setModel] = useState<ModelInfo | null>(modelCache.get(sessionId) ?? null);
+
+  useEffect(() => {
+    if (modelCache.has(sessionId)) {
+      setModel(modelCache.get(sessionId) ?? null);
+      return;
+    }
+    if (pendingModelFetches.has(sessionId)) return;
+
+    pendingModelFetches.add(sessionId);
+    fetch(`/api/session/${sessionId}/model`)
+      .then((r) => r.json())
+      .then((data: ModelInfo | null) => {
+        modelCache.set(sessionId, data);
+        setModel(data);
+      })
+      .catch(() => {
+        modelCache.set(sessionId, null);
+      })
+      .finally(() => {
+        pendingModelFetches.delete(sessionId);
+      });
+  }, [sessionId]);
+
+  return model;
+}
+
+function formatModelShort(model: string): string {
+  // claude-opus-4-5-20251101 → opus-4-5
+  // gpt-5.3-codex → gpt-5.3-codex
+  return model
+    .replace(/-\d{8,}$/, "")
+    .replace(/^claude-/, "");
+}
+
+function SessionModelBadge({ sessionId }: { sessionId: string }) {
+  const model = useSessionModel(sessionId);
+  if (!model) return null;
+  return (
+    <span className="text-[9px] text-zinc-400 dark:text-zinc-600 truncate">
+      {model.provider ? `${model.provider}/` : ""}{formatModelShort(model.model)}
+    </span>
+  );
+}
+
 const SOURCE_COLORS: Record<SessionSource, string> = {
   claude: "bg-blue-500",
   factory: "bg-emerald-500",
   codex: "bg-orange-500",
+  pi: "bg-pink-500",
 };
 
 const SOURCES: Array<{ key: SessionSource | "all"; label: string }> = [
@@ -15,6 +70,7 @@ const SOURCES: Array<{ key: SessionSource | "all"; label: string }> = [
   { key: "claude", label: "Claude" },
   { key: "factory", label: "Factory" },
   { key: "codex", label: "Codex" },
+  { key: "pi", label: "Pi" },
 ];
 
 interface SessionListProps {
@@ -258,15 +314,16 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                   }`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${SOURCE_COLORS[result.source as SessionSource] || "bg-zinc-400"}`} />
-                      <span className="text-[10px] text-zinc-500 font-medium">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${SOURCE_COLORS[result.source as SessionSource] || "bg-zinc-400"}`} />
+                      <span className="text-[10px] text-zinc-500 font-medium truncate">
                         {result.project.split("/").pop() || result.project}
                       </span>
+                      <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
+                      <SessionModelBadge sessionId={result.sessionId} />
                     </div>
-                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600">
-                      {result.timestamp ? formatTime(result.timestamp) : ""}{" "}
-                      <span className="capitalize">{result.source}</span>
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
+                      {result.timestamp ? formatTime(result.timestamp) : ""}
                     </span>
                   </div>
                   <p className="text-[12px] text-zinc-700 dark:text-zinc-300 leading-snug line-clamp-1 break-words mb-1">
@@ -317,13 +374,15 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                   } ${virtualItem.index === 0 ? "border-t border-t-zinc-200/60 dark:border-t-zinc-800/40" : ""}`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${SOURCE_COLORS[session.source]}`} />
-                      <span className="text-[10px] text-zinc-500 font-medium">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${SOURCE_COLORS[session.source]}`} />
+                      <span className="text-[10px] text-zinc-500 font-medium truncate">
                         {session.projectName}
                       </span>
+                      <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
+                      <SessionModelBadge sessionId={session.id} />
                     </div>
-                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600">
+                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
                       {formatTime(session.timestamp)}
                     </span>
                   </div>

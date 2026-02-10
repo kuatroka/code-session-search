@@ -3,32 +3,47 @@ import type { Session, SessionSource } from "@claude-run-plus/api";
 import { PanelLeft, Copy, Check, Sun, Moon } from "lucide-react";
 import { formatTime } from "./utils";
 import SessionList from "./components/session-list";
-import SessionView from "./components/session-view";
+import SessionView, { type SessionModelInfo } from "./components/session-view";
 import { useEventSource } from "./hooks/use-event-source";
 import { useSearchIndex, type SearchIndexEntry } from "./hooks/use-search-index";
 
 interface SessionHeaderProps {
   session: Session;
   copied: boolean;
+  modelInfo: SessionModelInfo | null;
   onCopyResumeCommand: (sessionId: string, projectPath: string, source: SessionSource) => void;
 }
 
+function formatModelName(model: string): string {
+  // Shorten verbose model names: claude-opus-4-5-20251101 → claude-opus-4-5
+  return model.replace(/-\d{8,}$/, "");
+}
+
 function SessionHeader(props: SessionHeaderProps) {
-  const { session, copied, onCopyResumeCommand } = props;
+  const { session, copied, modelInfo, onCopyResumeCommand } = props;
 
   return (
     <>
       <div className="flex items-center gap-3 min-w-0 flex-1">
         <SourceBadge source={session.source} />
-        <span className="text-sm text-zinc-700 dark:text-zinc-300 truncate max-w-xs">
-          {session.display}
-        </span>
-        <span className="text-xs text-zinc-400 dark:text-zinc-600 shrink-0">
-          {session.projectName}
-        </span>
-        <span className="text-xs text-zinc-400 dark:text-zinc-600 shrink-0">
-          {formatTime(session.timestamp)}
-        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-zinc-700 dark:text-zinc-300 truncate">
+              {session.display}
+            </span>
+            {modelInfo && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-zinc-200/80 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 shrink-0">
+                {modelInfo.provider ? `${modelInfo.provider}/` : ""}{formatModelName(modelInfo.model)}
+              </span>
+            )}
+            <span className="text-xs text-zinc-400 dark:text-zinc-600 shrink-0">
+              {formatTime(session.timestamp)}
+            </span>
+          </div>
+          <div className="text-[11px] text-zinc-400 dark:text-zinc-600 truncate">
+            {session.projectName}
+          </div>
+        </div>
       </div>
       <button
         onClick={() => onCopyResumeCommand(session.id, session.project, session.source)}
@@ -55,6 +70,7 @@ const SOURCE_COLORS: Record<SessionSource, string> = {
   claude: "bg-blue-500",
   factory: "bg-emerald-500",
   codex: "bg-orange-500",
+  pi: "bg-pink-500",
 };
 
 function SourceBadge({ source }: { source: SessionSource }) {
@@ -73,6 +89,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [currentModel, setCurrentModel] = useState<SessionModelInfo | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof window !== "undefined") {
       return (localStorage.getItem("claude-run-plus-theme") as "light" | "dark") || "dark";
@@ -170,6 +187,11 @@ function App() {
 
   const handleSelectSession = useCallback((sessionId: string) => {
     setSelectedSession(sessionId);
+    setCurrentModel(null);
+  }, []);
+
+  const handleModelChange = useCallback((info: SessionModelInfo | null) => {
+    setCurrentModel(info);
   }, []);
 
   const handleSearchQueryChange = useCallback((query: string) => {
@@ -240,13 +262,14 @@ function App() {
             <SessionHeader
               session={selectedSessionData}
               copied={copied}
+              modelInfo={currentModel}
               onCopyResumeCommand={handleCopyResumeCommand}
             />
           )}
         </div>
         <div className="flex-1 overflow-hidden">
           {selectedSession ? (
-            <SessionView sessionId={selectedSession} searchQuery={searchQuery} />
+            <SessionView sessionId={selectedSession} searchQuery={searchQuery} onModelChange={handleModelChange} />
           ) : (
             <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600">
               <div className="text-center">

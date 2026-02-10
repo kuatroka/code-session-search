@@ -13,6 +13,11 @@ export interface HistoryEntry {
   source: SessionSource;
 }
 
+export interface SessionModelInfo {
+  model: string;
+  provider: string;
+}
+
 export interface Session {
   id: string;
   display: string;
@@ -20,6 +25,7 @@ export interface Session {
   project: string;
   projectName: string;
   source: SessionSource;
+  latestModel?: SessionModelInfo;
 }
 
 export interface ConversationMessage {
@@ -696,6 +702,64 @@ export async function getConversationStream(
 export function getSessionSource(sessionId: string): SessionSource {
   const entry = fileIndex.get(sessionId);
   return entry?.source ?? "claude";
+}
+
+function deriveProvider(model: string): string {
+  if (model.startsWith("claude")) return "anthropic";
+  if (model.startsWith("gpt") || model.startsWith("o1") || model.startsWith("o3") || model.startsWith("o4")) return "openai";
+  if (model.includes("gemini")) return "google";
+  if (model.includes("codex")) return "openai-codex";
+  return "";
+}
+
+const modelCache = new Map<string, SessionModelInfo | null>();
+
+export function invalidateModelCache(sessionId: string): void {
+  modelCache.delete(sessionId);
+}
+
+export async function getSessionLatestModel(sessionId: string): Promise<SessionModelInfo | null> {
+  const cached = modelCache.get(sessionId);
+  if (cached !== undefined) return cached;
+
+  const entry = fileIndex.get(sessionId);
+  if (!entry) return null;
+
+  try {
+    const content = await readFile(entry.path, "utf-8");
+    const lines = content.trim().split("\n");
+
+    // Walk from the end to find the latest model reference
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        // Pi model_change events
+        if (parsed.type === "model_change" && parsed.modelId) {
+          const result: SessionModelInfo = {
+            model: parsed.modelId,
+            provider: parsed.provider || deriveProvider(parsed.modelId),
+          };
+          modelCache.set(sessionId, result);
+          return result;
+        }
+        // Assistant messages with model field
+        if (parsed.type === "assistant" && parsed.message?.model) {
+          const model = parsed.message.model;
+          const result: SessionModelInfo = {
+            model,
+            provider: deriveProvider(model),
+          };
+          modelCache.set(sessionId, result);
+          return result;
+        }
+      } catch { /* skip malformed */ }
+    }
+  } catch { /* ignore */ }
+
+  modelCache.set(sessionId, null);
+  return null;
 }
 
 const SANITIZE_PATTERNS = [

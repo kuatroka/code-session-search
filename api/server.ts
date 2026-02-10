@@ -15,6 +15,8 @@ import {
   addToFileIndex,
   getSessionSource,
   getAllSessionContent,
+  getSessionLatestModel,
+  invalidateModelCache,
 } from "./storage";
 import type { SessionSource } from "./storage";
 import {
@@ -222,6 +224,12 @@ export function createServer(options: ServerOptions) {
     return c.json(messages);
   });
 
+  app.get("/api/session/:id/model", async (c) => {
+    const sessionId = c.req.param("id");
+    const model = await getSessionLatestModel(sessionId);
+    return c.json(model);
+  });
+
   app.get("/api/conversation/:id/stream", async (c) => {
     const sessionId = c.req.param("id");
     const offsetParam = c.req.query("offset");
@@ -331,6 +339,7 @@ export function createServer(options: ServerOptions) {
   onSessionChange(async (sessionId: string, filePath: string, source: SessionSource) => {
     addToFileIndex(sessionId, filePath, source);
     markSessionDirty(sessionId);
+    invalidateModelCache(sessionId);
     try {
       const content = await getAllSessionContent(sessionId);
       const sessions = await getSessions();
