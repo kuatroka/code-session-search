@@ -647,11 +647,14 @@ export async function getConversationStream(
     return { messages: [], nextOffset: 0 };
   }
 
-  // For non-Claude sources, return all messages at once (no streaming optimization)
+  // For non-Claude sources, re-read all messages and return those after fromOffset (message count)
   if (entry && entry.source !== "claude") {
-    if (fromOffset > 0) return { messages: [], nextOffset: fromOffset };
     const messages = await getConversation(sessionId);
-    return { messages, nextOffset: 1 };
+    if (fromOffset >= messages.length) {
+      return { messages: [], nextOffset: messages.length };
+    }
+    const newMessages = messages.slice(fromOffset);
+    return { messages: newMessages, nextOffset: messages.length };
   }
 
   const messages: ConversationMessage[] = [];
