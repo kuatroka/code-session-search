@@ -380,7 +380,12 @@ export function createServer(options: ServerOptions) {
       initSearchDb();
 
       const openUrl = `http://localhost:${dev ? 12000 : port}/`;
-      console.log(`\n  claude-run-plus is running at ${openUrl}\n`);
+      if (dev) {
+        console.log(`\n  claude-run-plus API is running at http://localhost:${port}/`);
+        console.log(`  Frontend: run Vite at ${openUrl} (or next available port)\n`);
+      } else {
+        console.log(`\n  claude-run-plus is running at ${openUrl}\n`);
+      }
       if (!dev && shouldOpen) {
         open(openUrl).catch(console.error);
       }
@@ -388,6 +393,7 @@ export function createServer(options: ServerOptions) {
       httpServer = Bun.serve({
         port,
         fetch: app.fetch,
+        idleTimeout: 255, // max value — prevents SSE connections being killed
       });
 
       // Background indexing
