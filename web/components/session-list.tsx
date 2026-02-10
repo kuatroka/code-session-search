@@ -9,47 +9,13 @@ interface ModelInfo {
   provider: string;
 }
 
-const modelCache = new Map<string, ModelInfo | null>();
-const pendingModelFetches = new Set<string>();
-
-function useSessionModel(sessionId: string): ModelInfo | null {
-  const [model, setModel] = useState<ModelInfo | null>(modelCache.get(sessionId) ?? null);
-
-  useEffect(() => {
-    if (modelCache.has(sessionId)) {
-      setModel(modelCache.get(sessionId) ?? null);
-      return;
-    }
-    if (pendingModelFetches.has(sessionId)) return;
-
-    pendingModelFetches.add(sessionId);
-    fetch(`/api/session/${sessionId}/model`)
-      .then((r) => r.json())
-      .then((data: ModelInfo | null) => {
-        modelCache.set(sessionId, data);
-        setModel(data);
-      })
-      .catch(() => {
-        modelCache.set(sessionId, null);
-      })
-      .finally(() => {
-        pendingModelFetches.delete(sessionId);
-      });
-  }, [sessionId]);
-
-  return model;
-}
-
 function formatModelShort(model: string): string {
-  // claude-opus-4-5-20251101 → opus-4-5
-  // gpt-5.3-codex → gpt-5.3-codex
   return model
     .replace(/-\d{8,}$/, "")
     .replace(/^claude-/, "");
 }
 
-function SessionModelBadge({ sessionId }: { sessionId: string }) {
-  const model = useSessionModel(sessionId);
+function ModelBadge({ model }: { model: ModelInfo | null }) {
   if (!model) return null;
   return (
     <span className="text-[9px] text-zinc-400 dark:text-zinc-600 truncate">
@@ -92,6 +58,53 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const resultRefsMap = useRef<Map<number, HTMLButtonElement>>(new Map());
+
+  // Batch model fetching — fetch once per session, cache globally, no per-row state updates
+  const [modelMap, setModelMap] = useState<Map<string, ModelInfo | null>>(new Map());
+  const fetchedModelsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const ids = sessions.map((s) => s.id).filter((id) => !fetchedModelsRef.current.has(id));
+    if (ids.length === 0) return;
+
+    // Mark as fetched immediately to prevent duplicate requests
+    for (const id of ids) fetchedModelsRef.current.add(id);
+
+    // Fetch in batches of 20 with small delays to avoid hammering the server
+    let cancelled = false;
+    (async () => {
+      const newEntries = new Map<string, ModelInfo | null>();
+      for (let i = 0; i < ids.length; i += 20) {
+        if (cancelled) return;
+        const batch = ids.slice(i, i + 20);
+        const results = await Promise.all(
+          batch.map(async (id) => {
+            try {
+              const res = await fetch(`/api/session/${id}/model`);
+              const data: ModelInfo | null = await res.json();
+              return [id, data] as const;
+            } catch {
+              return [id, null] as const;
+            }
+          })
+        );
+        for (const [id, data] of results) {
+          newEntries.set(id, data);
+        }
+        // Small delay between batches
+        if (i + 20 < ids.length) await new Promise((r) => setTimeout(r, 50));
+      }
+      if (!cancelled) {
+        setModelMap((prev) => {
+          const next = new Map(prev);
+          for (const [id, data] of newEntries) next.set(id, data);
+          return next;
+        });
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [sessions]);
 
   const [searchResults, setSearchResults] = useState<ClientSearchResult[] | null>(null);
 
@@ -320,7 +333,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                         {result.project.split("/").pop() || result.project}
                       </span>
                       <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
-                      <SessionModelBadge sessionId={result.sessionId} />
+                      <ModelBadge model={modelMap.get(result.sessionId) ?? null} />
                     </div>
                     <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
                       {result.timestamp ? formatTime(result.timestamp) : ""}
@@ -380,7 +393,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                         {session.projectName}
                       </span>
                       <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
-                      <SessionModelBadge sessionId={session.id} />
+                      <ModelBadge model={modelMap.get(session.id) ?? null} />
                     </div>
                     <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
                       {formatTime(session.timestamp)}
