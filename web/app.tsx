@@ -129,10 +129,21 @@ function App() {
   }, [sessions, selectedSession]);
 
   useEffect(() => {
-    fetch("/api/projects")
-      .then((res) => res.json())
-      .then(setProjects)
-      .catch(console.error);
+    let cancelled = false;
+    const fetchProjects = async (retries = 3) => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const res = await fetch("/api/projects");
+          const data = await res.json();
+          if (!cancelled) setProjects(data);
+          return;
+        } catch {
+          if (i < retries - 1) await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+    };
+    fetchProjects();
+    return () => { cancelled = true; };
   }, []);
 
   const handleSessionsFull = useCallback((event: MessageEvent) => {
@@ -237,7 +248,7 @@ function App() {
       )}
 
       <main className="flex-1 overflow-hidden bg-white dark:bg-zinc-950 flex flex-col">
-        <div className="h-[50px] border-b border-zinc-200 dark:border-zinc-800/60 flex items-center px-4 gap-4">
+        <div className="min-h-[50px] border-b border-zinc-200 dark:border-zinc-800/60 flex items-center px-4 py-2 gap-4">
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="p-1.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded transition-colors cursor-pointer"

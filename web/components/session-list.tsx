@@ -61,16 +61,17 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
 
   // Batch model fetching — fetch once per session, cache globally, no per-row state updates
   const [modelMap, setModelMap] = useState<Map<string, ModelInfo | null>>(new Map());
-  const fetchedModelsRef = useRef<Set<string>>(new Set());
+  const pendingModelsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const ids = sessions.map((s) => s.id).filter((id) => !fetchedModelsRef.current.has(id));
+    const ids = sessions
+      .map((s) => s.id)
+      .filter((id) => !modelMap.has(id) && !pendingModelsRef.current.has(id));
     if (ids.length === 0) return;
 
-    // Mark as fetched immediately to prevent duplicate requests
-    for (const id of ids) fetchedModelsRef.current.add(id);
+    // Mark as pending to prevent duplicate concurrent requests
+    for (const id of ids) pendingModelsRef.current.add(id);
 
-    // Fetch in batches of 20 with small delays to avoid hammering the server
     let cancelled = false;
     (async () => {
       const newEntries = new Map<string, ModelInfo | null>();
@@ -91,20 +92,23 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
         for (const [id, data] of results) {
           newEntries.set(id, data);
         }
-        // Small delay between batches
-        if (i + 20 < ids.length) await new Promise((r) => setTimeout(r, 50));
       }
       if (!cancelled) {
+        // Remove from pending and store results
+        for (const id of ids) pendingModelsRef.current.delete(id);
         setModelMap((prev) => {
           const next = new Map(prev);
           for (const [id, data] of newEntries) next.set(id, data);
           return next;
         });
+      } else {
+        // Cancelled — remove from pending so they can be retried
+        for (const id of ids) pendingModelsRef.current.delete(id);
       }
     })();
 
     return () => { cancelled = true; };
-  }, [sessions]);
+  }, [sessions, modelMap]);
 
   const [searchResults, setSearchResults] = useState<ClientSearchResult[] | null>(null);
 
