@@ -747,8 +747,18 @@ export async function getSessionLatestModel(sessionId: string): Promise<SessionM
           modelCache.set(sessionId, result);
           return result;
         }
-        // Assistant messages with model field
+        // Claude/Codex assistant messages with model field
         if (parsed.type === "assistant" && parsed.message?.model) {
+          const model = parsed.message.model;
+          const result: SessionModelInfo = {
+            model,
+            provider: deriveProvider(model),
+          };
+          modelCache.set(sessionId, result);
+          return result;
+        }
+        // Factory "message" type with role=assistant
+        if (parsed.type === "message" && parsed.message?.model) {
           const model = parsed.message.model;
           const result: SessionModelInfo = {
             model,
@@ -760,6 +770,22 @@ export async function getSessionLatestModel(sessionId: string): Promise<SessionM
       } catch { /* skip malformed */ }
     }
   } catch { /* ignore */ }
+
+  // Fallback: check for companion settings file (Factory stores model there)
+  if (entry.source === "factory") {
+    try {
+      const settingsPath = entry.path.replace(/\.jsonl$/, ".settings.json");
+      const settings = JSON.parse(await readFile(settingsPath, "utf-8"));
+      if (settings.model) {
+        // Factory model format: "custom:claude-opus-4-6-1" → strip "custom:" prefix
+        const rawModel = settings.model.replace(/^custom:/, "");
+        const provider = settings.providerLock || deriveProvider(rawModel);
+        const result: SessionModelInfo = { model: rawModel, provider };
+        modelCache.set(sessionId, result);
+        return result;
+      }
+    } catch { /* no settings file */ }
+  }
 
   modelCache.set(sessionId, null);
   return null;

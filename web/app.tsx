@@ -40,8 +40,8 @@ function SessionHeader(props: SessionHeaderProps) {
               {formatTime(session.timestamp)}
             </span>
           </div>
-          <div className="text-[11px] text-zinc-400 dark:text-zinc-600 truncate">
-            {session.projectName}
+          <div className="text-[11px] text-zinc-500 dark:text-zinc-500 truncate mt-0.5">
+            📁 {session.projectName} — {session.project}
           </div>
         </div>
       </div>
@@ -199,10 +199,18 @@ function App() {
   const handleSelectSession = useCallback((sessionId: string) => {
     setSelectedSession(sessionId);
     setCurrentModel(null);
+    // Fetch model from server (works for all sources including Factory settings.json)
+    fetch(`/api/session/${sessionId}/model`)
+      .then((r) => r.json())
+      .then((data: SessionModelInfo | null) => {
+        if (data) setCurrentModel(data);
+      })
+      .catch(() => {});
   }, []);
 
   const handleModelChange = useCallback((info: SessionModelInfo | null) => {
-    setCurrentModel(info);
+    // Client-side extraction overrides server model (more up-to-date for streaming sessions)
+    if (info) setCurrentModel(info);
   }, []);
 
   const handleSearchQueryChange = useCallback((query: string) => {
