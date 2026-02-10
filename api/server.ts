@@ -7,16 +7,17 @@ import {
   getClaudeDir,
   getFactoryDir,
   getCodexDir,
+  getPiDir,
   getSessions,
   getProjects,
   getConversation,
   getConversationStream,
   invalidateHistoryCache,
   addToFileIndex,
-  getSessionSource,
   getAllSessionContent,
   getSessionLatestModel,
   invalidateModelCache,
+  deleteSession,
 } from "./storage";
 import type { SessionSource } from "./storage";
 import {
@@ -36,6 +37,8 @@ import {
   closeSearchDb,
   markSessionDirty,
   getDirtySessions,
+  setExpectedSessions,
+  removeIndexedSession,
 } from "./search";
 import { join } from "path";
 import { existsSync } from "fs";
@@ -61,8 +64,7 @@ export function createServer(options: ServerOptions) {
   const { port, claudeDir, dev = false, open: shouldOpen = true } = options;
 
   initStorage(claudeDir);
-  const piSessionsDir = join(homedir(), ".pi", "agent", "sessions");
-  initWatcher(getClaudeDir(), getFactoryDir(), getCodexDir(), piSessionsDir);
+  initWatcher(getClaudeDir(), getFactoryDir(), getCodexDir(), getPiDir());
 
   const app = new Hono();
 
@@ -71,7 +73,7 @@ export function createServer(options: ServerOptions) {
       "*",
       cors({
         origin: ["http://localhost:12000"],
-        allowMethods: ["GET", "POST", "OPTIONS"],
+        allowMethods: ["GET", "POST", "DELETE", "OPTIONS"],
         allowHeaders: ["Content-Type"],
       }),
     );
@@ -80,6 +82,36 @@ export function createServer(options: ServerOptions) {
   app.get("/api/sessions", async (c) => {
     const sessions = await getSessions();
     return c.json(sessions);
+  });
+
+  app.delete("/api/sessions/:id", async (c) => {
+    const sessionId = c.req.param("id");
+    const sourceQuery = c.req.query("source");
+
+    let source: SessionSource | undefined;
+    if (sourceQuery) {
+      if (sourceQuery !== "claude" && sourceQuery !== "factory" && sourceQuery !== "codex" && sourceQuery !== "pi") {
+        return c.json({ ok: false, error: "Invalid source" }, 400);
+      }
+      source = sourceQuery;
+    }
+
+    const deleted = await deleteSession(sessionId, source);
+    if (!deleted) {
+      return c.json({ ok: false, error: "Session not found" }, 404);
+    }
+
+    removeIndexedSession(sessionId, source);
+    invalidateHistoryCache();
+
+    try {
+      const sessions = await getSessions();
+      setExpectedSessions(sessions);
+    } catch {
+      // ignore refresh errors
+    }
+
+    return c.json({ ok: true, id: sessionId });
   });
 
   app.get("/api/projects", async (c) => {
@@ -104,6 +136,7 @@ export function createServer(options: ServerOptions) {
         }
         try {
           const sessions = await getSessions();
+          setExpectedSessions(sessions);
           const newOrUpdated = sessions.filter((s) => {
             const known = knownSessions.get(s.id);
             return known === undefined || known !== s.timestamp;
@@ -297,8 +330,17 @@ export function createServer(options: ServerOptions) {
   app.get("/api/search", async (c) => {
     const query = c.req.query("q") || "";
     const source = c.req.query("source") || undefined;
-    const results = searchSessions(query, source);
-    return c.json(results);
+    const limit = Math.max(1, Math.min(100, parseInt(c.req.query("limit") || "50", 10) || 50));
+    const fuzzy = c.req.query("fuzzy") !== "0";
+    const requireComplete = c.req.query("requireComplete") === "1";
+
+    const response = searchSessions(query, source, { limit, fuzzy });
+
+    if (requireComplete && response.partial) {
+      return c.json(response, 409);
+    }
+
+    return c.json(response);
   });
 
   app.get("/api/search-index", async (c) => {
@@ -334,6 +376,14 @@ export function createServer(options: ServerOptions) {
 
   onHistoryChange(() => {
     invalidateHistoryCache();
+    (async () => {
+      try {
+        const sessions = await getSessions();
+        setExpectedSessions(sessions);
+      } catch {
+        // ignore
+      }
+    })();
   });
 
   onSessionChange(async (sessionId: string, filePath: string, source: SessionSource) => {
@@ -379,15 +429,19 @@ export function createServer(options: ServerOptions) {
       await loadStorage();
       initSearchDb();
 
+      const initialSessions = await getSessions();
+      setExpectedSessions(initialSessions);
+
       const openUrl = `http://localhost:${dev ? 12000 : port}/`;
+      const apiUrl = `http://localhost:${port}/`;
       if (dev) {
-        console.log(`\n  claude-run-plus API is running at http://localhost:${port}/`);
+        console.log(`\n  claude-run-plus API is running at ${apiUrl}`);
         console.log(`  Frontend: run Vite at ${openUrl} (or next available port)\n`);
       } else {
         console.log(`\n  claude-run-plus is running at ${openUrl}\n`);
-      }
-      if (!dev && shouldOpen) {
-        open(openUrl).catch(console.error);
+        if (shouldOpen) {
+          open(openUrl).catch(console.error);
+        }
       }
 
       httpServer = Bun.serve({
@@ -400,9 +454,10 @@ export function createServer(options: ServerOptions) {
       (async () => {
         try {
           const sessions = await getSessions();
+          setExpectedSessions(sessions);
           let indexed = 0;
           for (const session of sessions) {
-            if (isSessionIndexed(session.id)) continue;
+            if (isSessionIndexed(session.id, session.source)) continue;
             try {
               const content = await getAllSessionContent(session.id);
               indexSession(session.id, session.source, session.display, session.project, content, session.timestamp);
