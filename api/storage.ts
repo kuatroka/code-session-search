@@ -3,7 +3,7 @@ import { join, basename } from "path";
 import { homedir } from "os";
 import { createInterface } from "readline";
 
-export type SessionSource = "claude" | "factory" | "codex";
+export type SessionSource = "claude" | "factory" | "codex" | "pi";
 
 export interface HistoryEntry {
   display: string;
@@ -324,26 +324,29 @@ async function loadCodexHistory(): Promise<HistoryEntry[]> {
     const historyPath = join(codexDir, "history.jsonl");
     const content = await readFile(historyPath, "utf-8");
     const lines = content.trim().split("\n").filter(Boolean);
-    const entries: HistoryEntry[] = [];
-    const seenSessions = new Set<string>();
+    const latestEntriesBySession = new Map<string, HistoryEntry>();
     for (const line of lines) {
       try {
         const parsed = JSON.parse(line);
         const sessionId = parsed.session_id;
-        if (!sessionId || seenSessions.has(sessionId)) continue;
-        seenSessions.add(sessionId);
+        if (!sessionId) continue;
         const ts = typeof parsed.ts === "string" ? parseInt(parsed.ts, 10) : parsed.ts;
         const timestamp = ts < 1e12 ? ts * 1000 : ts;
-        entries.push({
+        const nextEntry: HistoryEntry = {
           display: (parsed.text || "Codex Session").slice(0, 200),
           timestamp,
           project: "",
           sessionId,
           source: "codex",
-        });
+        };
+
+        const existing = latestEntriesBySession.get(sessionId);
+        if (!existing || nextEntry.timestamp > existing.timestamp) {
+          latestEntriesBySession.set(sessionId, nextEntry);
+        }
       } catch { /* skip */ }
     }
-    return entries;
+    return Array.from(latestEntriesBySession.values());
   } catch {
     return [];
   }
@@ -527,6 +530,19 @@ async function loadAllHistory(): Promise<HistoryEntry[]> {
   return allEntries;
 }
 
+export function dedupeSessionsByLatestTimestamp(sessions: Session[]): Session[] {
+  const latestBySessionId = new Map<string, Session>();
+
+  for (const session of sessions) {
+    const existing = latestBySessionId.get(session.id);
+    if (!existing || session.timestamp > existing.timestamp) {
+      latestBySessionId.set(session.id, session);
+    }
+  }
+
+  return Array.from(latestBySessionId.values()).sort((a, b) => b.timestamp - a.timestamp);
+}
+
 export async function loadStorage(): Promise<void> {
   await Promise.all([
     buildClaudeFileIndex(),
@@ -540,7 +556,6 @@ export async function getSessions(): Promise<Session[]> {
   return dedupe("getSessions", async () => {
     const entries = historyCache ?? (await loadAllHistory());
     const sessions: Session[] = [];
-    const seenIds = new Set<string>();
 
     for (const entry of entries) {
       let sessionId = entry.sessionId;
@@ -550,8 +565,7 @@ export async function getSessions(): Promise<Session[]> {
         sessionId = await findClaudeSessionByTimestamp(encodedProject, entry.timestamp);
       }
 
-      if (!sessionId || seenIds.has(sessionId)) continue;
-      seenIds.add(sessionId);
+      if (!sessionId) continue;
 
       sessions.push({
         id: sessionId,
@@ -563,7 +577,7 @@ export async function getSessions(): Promise<Session[]> {
       });
     }
 
-    return sessions.sort((a, b) => b.timestamp - a.timestamp);
+    return dedupeSessionsByLatestTimestamp(sessions);
   });
 }
 

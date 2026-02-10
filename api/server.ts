@@ -37,6 +37,7 @@ import {
 } from "./search";
 import { join } from "path";
 import { existsSync } from "fs";
+import { homedir } from "os";
 import open from "open";
 
 function getWebDistPath(): string {
@@ -58,7 +59,8 @@ export function createServer(options: ServerOptions) {
   const { port, claudeDir, dev = false, open: shouldOpen = true } = options;
 
   initStorage(claudeDir);
-  initWatcher(getClaudeDir(), getFactoryDir(), getCodexDir());
+  const piSessionsDir = join(homedir(), ".pi", "agent", "sessions");
+  initWatcher(getClaudeDir(), getFactoryDir(), getCodexDir(), piSessionsDir);
 
   const app = new Hono();
 
@@ -125,20 +127,62 @@ export function createServer(options: ServerOptions) {
         try {
           const content = await getAllSessionContent(sessionId);
           const sessions = await getSessions();
-          const session = sessions.find((s) => s.id === sessionId);
-          if (session) {
+          let session = sessions.find((s) => s.id === sessionId);
+
+          // For new sessions not yet in history.jsonl, build a minimal session object
+          if (!session) {
+            // Invalidate cache and retry — history.jsonl may have just been written
+            invalidateHistoryCache();
+            const retried = await getSessions();
+            session = retried.find((s) => s.id === sessionId);
+          }
+
+          if (!session) {
+            // Still not found — emit with best-effort metadata
+            // Extract project from file path if possible
+            const filePath = _filePath;
+            const projectMatch = filePath.match(/projects\/([^/]+)\//);
+            const project = projectMatch ? projectMatch[1].replace(/-/g, "/") : "";
+            const display = content.slice(0, 100) || "New session";
+
             await stream.writeSSE({
               event: "contentUpdate",
               data: JSON.stringify({
                 id: sessionId,
                 source,
-                display: session.display,
-                project: session.project,
+                display,
+                project,
                 content,
-                timestamp: session.timestamp,
+                timestamp: Date.now(),
               }),
             });
+
+            // Also emit as a new session so the sidebar picks it up
+            await stream.writeSSE({
+              event: "sessionsUpdate",
+              data: JSON.stringify([{
+                id: sessionId,
+                display,
+                timestamp: Date.now(),
+                project,
+                projectName: project.split("/").pop() || project,
+                source,
+              }]),
+            });
+            return;
           }
+
+          await stream.writeSSE({
+            event: "contentUpdate",
+            data: JSON.stringify({
+              id: sessionId,
+              source,
+              display: session.display,
+              project: session.project,
+              content,
+              timestamp: session.timestamp,
+            }),
+          });
         } catch { /* ignore */ }
       };
 

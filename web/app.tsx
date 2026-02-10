@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { Session, SessionSource } from "@claude-run-plus/api";
 import { PanelLeft, Copy, Check, Sun, Moon } from "lucide-react";
 import { formatTime } from "./utils";
 import SessionList from "./components/session-list";
 import SessionView from "./components/session-view";
 import { useEventSource } from "./hooks/use-event-source";
+import { useSearchIndex, type SearchIndexEntry } from "./hooks/use-search-index";
 
 interface SessionHeaderProps {
   session: Session;
@@ -140,10 +141,18 @@ function App() {
     setLoading(false);
   }, []);
 
+  const { search: searchFn, ready: searchReady, upsertEntry } = useSearchIndex();
+
+  const handleContentUpdate = useCallback((event: MessageEvent) => {
+    const update: SearchIndexEntry = JSON.parse(event.data);
+    upsertEntry(update);
+  }, [upsertEntry]);
+
   useEventSource("/api/sessions/stream", {
     events: [
       { eventName: "sessions", onMessage: handleSessionsFull },
       { eventName: "sessionsUpdate", onMessage: handleSessionsUpdate },
+      { eventName: "contentUpdate", onMessage: handleContentUpdate },
     ],
     onError: handleSessionsError,
   });
@@ -199,6 +208,8 @@ function App() {
             selectedSource={selectedSource}
             onSelectSource={setSelectedSource}
             onSearchQueryChange={handleSearchQueryChange}
+            searchFn={searchFn}
+            searchReady={searchReady}
           />
         </aside>
       )}

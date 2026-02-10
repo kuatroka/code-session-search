@@ -2,7 +2,7 @@ import { useState, useMemo, memo, useRef, useEffect, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { Session, SessionSource } from "@claude-run-plus/api";
 import { formatTime } from "../utils";
-import { useSearchIndex, type ClientSearchResult } from "../hooks/use-search-index";
+import type { ClientSearchResult } from "../hooks/use-search-index";
 
 const SOURCE_COLORS: Record<SessionSource, string> = {
   claude: "bg-blue-500",
@@ -25,17 +25,18 @@ interface SessionListProps {
   selectedSource: SessionSource | null;
   onSelectSource: (source: SessionSource | null) => void;
   onSearchQueryChange?: (query: string) => void;
+  searchFn: (query: string, source?: string | null) => Promise<ClientSearchResult[]>;
+  searchReady: boolean;
 }
 
 const SessionList = memo(function SessionList(props: SessionListProps) {
-  const { sessions, selectedSession, onSelectSession, loading, selectedSource, onSelectSource, onSearchQueryChange } = props;
+  const { sessions, selectedSession, onSelectSession, loading, selectedSource, onSelectSource, onSearchQueryChange, searchFn: clientSearch, searchReady } = props;
   const [search, setSearch] = useState("");
   const [highlightIdx, setHighlightIdx] = useState(-1);
   const parentRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const resultRefsMap = useRef<Map<number, HTMLButtonElement>>(new Map());
 
-  const { search: clientSearch, ready: searchReady } = useSearchIndex();
   const [searchResults, setSearchResults] = useState<ClientSearchResult[] | null>(null);
 
   useEffect(() => {
@@ -43,11 +44,14 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
       setSearchResults(null);
       return;
     }
-    let cancelled = false;
-    clientSearch(search, selectedSource).then((results) => {
-      if (!cancelled) setSearchResults(results.length > 0 ? results : []);
-    });
-    return () => { cancelled = true; };
+    const timer = setTimeout(() => {
+      let cancelled = false;
+      clientSearch(search, selectedSource).then((results) => {
+        if (!cancelled) setSearchResults(results.length > 0 ? results : []);
+      });
+      // Note: cancelled is scoped to the timeout callback, cleanup below handles stale timers
+    }, 200);
+    return () => clearTimeout(timer);
   }, [search, selectedSource, searchReady, clientSearch]);
 
   useEffect(() => {
