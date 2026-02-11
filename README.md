@@ -1,6 +1,6 @@
 <div align="center">
 
-# Claude Run
+# Code Session Search
 
 Browse your Claude Code conversation history in a beautiful web UI
 
