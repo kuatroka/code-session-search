@@ -11,7 +11,7 @@ interface SessionHeaderProps {
   session: Session;
   copied: boolean;
   modelInfo: SessionModelInfo | null;
-  onCopyResumeCommand: (sessionId: string, projectPath: string, source: SessionSource) => void;
+  onCopyResumeCommand: (sessionId: string) => void;
 }
 
 function formatModelName(model: string): string {
@@ -46,20 +46,15 @@ function SessionHeader(props: SessionHeaderProps) {
         </div>
       </div>
       <button
-        onClick={() => onCopyResumeCommand(session.id, session.project, session.source)}
-        className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded transition-colors cursor-pointer shrink-0"
-        title="Copy resume command to clipboard"
+        onClick={() => onCopyResumeCommand(session.id)}
+        className="flex items-center justify-center p-1.5 text-zinc-700 dark:text-zinc-300 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 rounded transition-colors cursor-pointer shrink-0"
+        title={copied ? "Session ID copied" : "Copy session ID"}
+        aria-label={copied ? "Session ID copied" : "Copy session ID"}
       >
         {copied ? (
-          <>
-            <Check className="w-3.5 h-3.5 text-green-600 dark:text-green-500" />
-            <span className="text-green-600 dark:text-green-500">Copied!</span>
-          </>
+          <Check className="w-4 h-4 text-green-600 dark:text-green-500" />
         ) : (
-          <>
-            <Copy className="w-3.5 h-3.5" />
-            <span>Copy Resume Command</span>
-          </>
+          <Copy className="w-4 h-4" />
         )}
       </button>
     </>
@@ -107,19 +102,8 @@ function App() {
   }, [theme]);
 
   const handleCopyResumeCommand = useCallback(
-    (sessionId: string, projectPath: string, source: SessionSource) => {
-      let command: string;
-      switch (source) {
-        case "factory":
-          command = `cd ${projectPath} && droid --resume ${sessionId}`;
-          break;
-        case "codex":
-          command = `cd ${projectPath} && codex --resume ${sessionId}`;
-          break;
-        default:
-          command = `cd ${projectPath} && claude --resume ${sessionId}`;
-      }
-      navigator.clipboard.writeText(command).then(() => {
+    (sessionId: string) => {
+      navigator.clipboard.writeText(sessionId).then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       });
