@@ -169,7 +169,7 @@ function App() {
     setLoading(false);
   }, []);
 
-  const { search: searchFn, ready: searchReady, upsertEntry } = useSearchIndex();
+  const { search: searchFn, ready: searchReady, upsertEntry, removeEntry } = useSearchIndex();
 
   const handleContentUpdate = useCallback((event: MessageEvent) => {
     const update: SearchIndexEntry = JSON.parse(event.data);
@@ -208,6 +208,23 @@ function App() {
       .catch(() => {});
   }, []);
 
+  const handleDeleteSession = useCallback(async (sessionId: string, source: SessionSource) => {
+    const res = await fetch(`/api/sessions/${sessionId}?source=${encodeURIComponent(source)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) {
+      throw new Error("Failed to delete session");
+    }
+
+    setSessions((prev) => prev.filter((s) => !(s.id === sessionId && s.source === source)));
+    removeEntry(sessionId, source);
+
+    if (selectedSession === sessionId) {
+      setSelectedSession(null);
+      setCurrentModel(null);
+    }
+  }, [removeEntry, selectedSession]);
+
   const handleModelChange = useCallback((info: SessionModelInfo | null) => {
     // Client-side extraction overrides server model (more up-to-date for streaming sessions)
     if (info) setCurrentModel(info);
@@ -245,6 +262,7 @@ function App() {
             sessions={filteredSessions}
             selectedSession={selectedSession}
             onSelectSession={handleSelectSession}
+            onDeleteSession={handleDeleteSession}
             loading={loading}
             selectedSource={selectedSource}
             onSelectSource={setSelectedSource}

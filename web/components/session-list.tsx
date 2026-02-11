@@ -1,5 +1,6 @@
 import { useState, useMemo, memo, useRef, useEffect, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { Trash2 } from "lucide-react";
 import type { Session, SessionSource } from "@claude-run-plus/api";
 import { formatTime } from "../utils";
 import type { ClientSearchResult } from "../hooks/use-search-index";
@@ -43,6 +44,7 @@ interface SessionListProps {
   sessions: Session[];
   selectedSession: string | null;
   onSelectSession: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string, source: SessionSource) => Promise<void>;
   loading?: boolean;
   selectedSource: SessionSource | null;
   onSelectSource: (source: SessionSource | null) => void;
@@ -52,12 +54,13 @@ interface SessionListProps {
 }
 
 const SessionList = memo(function SessionList(props: SessionListProps) {
-  const { sessions, selectedSession, onSelectSession, loading, selectedSource, onSelectSource, onSearchQueryChange, searchFn: clientSearch, searchReady } = props;
+  const { sessions, selectedSession, onSelectSession, onDeleteSession, loading, selectedSource, onSelectSource, onSearchQueryChange, searchFn: clientSearch, searchReady } = props;
   const [search, setSearch] = useState("");
   const [highlightIdx, setHighlightIdx] = useState(-1);
+  const [deletingSession, setDeletingSession] = useState<string | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const resultRefsMap = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const resultRefsMap = useRef<Map<number, HTMLDivElement>>(new Map());
 
   // Batch model fetching — fetch once per session, cache globally, no per-row state updates
   const [modelMap, setModelMap] = useState<Map<string, ModelInfo | null>>(new Map());
@@ -213,7 +216,18 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
     return () => document.removeEventListener("keydown", handleGlobalKey);
   }, []);
 
-  const setResultRef = useCallback((idx: number, el: HTMLButtonElement | null) => {
+  const handleDeleteSession = useCallback(async (sessionId: string, source: SessionSource) => {
+    const confirmed = window.confirm("Delete this session permanently?");
+    if (!confirmed) return;
+    setDeletingSession(sessionId);
+    try {
+      await onDeleteSession(sessionId, source);
+    } finally {
+      setDeletingSession((prev) => (prev === sessionId ? null : prev));
+    }
+  }, [onDeleteSession]);
+
+  const setResultRef = useCallback((idx: number, el: HTMLDivElement | null) => {
     if (el) {
       resultRefsMap.current.set(idx, el);
     } else {
@@ -317,41 +331,61 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
             </p>
           ) : (
             <div className="divide-y divide-zinc-200/60 dark:divide-zinc-800/40">
-              {searchResults!.map((result, idx) => (
-                <button
-                  key={result.sessionId}
-                  ref={(el) => setResultRef(idx, el)}
-                  onClick={() => onSelectSession(result.sessionId)}
-                  className={`w-full px-3 py-3 text-left transition-colors ${
-                    highlightIdx === idx
-                      ? "bg-zinc-100 dark:bg-zinc-800"
-                      : selectedSession === result.sessionId
-                        ? "bg-cyan-100 dark:bg-cyan-700/30"
-                        : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${SOURCE_COLORS[result.source as SessionSource] || "bg-zinc-400"}`} />
-                      <span className="text-[10px] text-zinc-500 font-medium truncate">
-                        {result.project.split("/").pop() || result.project}
-                      </span>
-                      <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
-                      <ModelBadge model={modelMap.get(result.sessionId) ?? null} />
-                    </div>
-                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
-                      {result.timestamp ? formatTime(result.timestamp) : ""}
-                    </span>
+              {searchResults!.map((result, idx) => {
+                const resultSource = (result.source as SessionSource) || "claude";
+                const deleting = deletingSession === result.sessionId;
+                return (
+                  <div
+                    key={`${result.source}:${result.sessionId}`}
+                    ref={(el) => setResultRef(idx, el)}
+                    className={`group flex items-stretch ${
+                      highlightIdx === idx
+                        ? "bg-zinc-100 dark:bg-zinc-800"
+                        : selectedSession === result.sessionId
+                          ? "bg-cyan-100 dark:bg-cyan-700/30"
+                          : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
+                    }`}
+                  >
+                    <button
+                      onClick={() => onSelectSession(result.sessionId)}
+                      className="flex-1 px-3 py-3 text-left transition-colors"
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${SOURCE_COLORS[resultSource] || "bg-zinc-400"}`} />
+                          <span className="text-[10px] text-zinc-500 font-medium truncate">
+                            {result.project.split("/").pop() || result.project}
+                          </span>
+                          <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
+                          <ModelBadge model={modelMap.get(result.sessionId) ?? null} />
+                        </div>
+                        <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
+                          {result.timestamp ? formatTime(result.timestamp) : ""}
+                        </span>
+                      </div>
+                      <p className="text-[12px] text-zinc-700 dark:text-zinc-300 leading-snug line-clamp-1 break-words mb-1">
+                        {result.display}
+                      </p>
+                      <p
+                        className="text-[11px] text-zinc-500 dark:text-zinc-500 leading-snug line-clamp-2 break-words"
+                        dangerouslySetInnerHTML={{ __html: result.snippet }}
+                      />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDeleteSession(result.sessionId, resultSource);
+                      }}
+                      disabled={deleting}
+                      className="mr-2 my-2 p-1.5 self-start rounded text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 opacity-0 group-hover:opacity-100 focus:opacity-100 transition disabled:opacity-40"
+                      title="Delete session"
+                      aria-label="Delete session"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                  <p className="text-[12px] text-zinc-700 dark:text-zinc-300 leading-snug line-clamp-1 break-words mb-1">
-                    {result.display}
-                  </p>
-                  <p
-                    className="text-[11px] text-zinc-500 dark:text-zinc-500 leading-snug line-clamp-2 break-words"
-                    dangerouslySetInnerHTML={{ __html: result.snippet }}
-                  />
-                </button>
-              ))}
+                );
+              })}
             </div>
           )
         ) : filteredSessions.length === 0 ? (
@@ -369,12 +403,12 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
             {virtualizer.getVirtualItems().map((virtualItem) => {
               const session = filteredSessions[virtualItem.index];
               const isHighlighted = highlightIdx === virtualItem.index;
+              const deleting = deletingSession === session.id;
               return (
-                <button
-                  key={session.id}
+                <div
+                  key={`${session.source}:${session.id}`}
                   data-index={virtualItem.index}
                   ref={virtualizer.measureElement}
-                  onClick={() => onSelectSession(session.id)}
                   style={{
                     position: "absolute",
                     top: 0,
@@ -382,7 +416,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                     width: "100%",
                     transform: `translateY(${virtualItem.start}px)`,
                   }}
-                  className={`px-3 py-3.5 text-left transition-colors overflow-hidden border-b border-zinc-200/60 dark:border-zinc-800/40 ${
+                  className={`group flex items-stretch overflow-hidden border-b border-zinc-200/60 dark:border-zinc-800/40 ${
                     isHighlighted
                       ? "bg-zinc-100 dark:bg-zinc-800"
                       : selectedSession === session.id
@@ -390,23 +424,40 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                         : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
                   } ${virtualItem.index === 0 ? "border-t border-t-zinc-200/60 dark:border-t-zinc-800/40" : ""}`}
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${SOURCE_COLORS[session.source]}`} />
-                      <span className="text-[10px] text-zinc-500 font-medium truncate">
-                        {session.projectName}
+                  <button
+                    onClick={() => onSelectSession(session.id)}
+                    className="flex-1 px-3 py-3.5 text-left transition-colors"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${SOURCE_COLORS[session.source]}`} />
+                        <span className="text-[10px] text-zinc-500 font-medium truncate">
+                          {session.projectName}
+                        </span>
+                        <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
+                        <ModelBadge model={modelMap.get(session.id) ?? null} />
+                      </div>
+                      <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
+                        {formatTime(session.timestamp)}
                       </span>
-                      <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
-                      <ModelBadge model={modelMap.get(session.id) ?? null} />
                     </div>
-                    <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
-                      {formatTime(session.timestamp)}
-                    </span>
-                  </div>
-                  <p className="text-[12px] text-zinc-700 dark:text-zinc-300 leading-snug line-clamp-2 break-words">
-                    {session.display}
-                  </p>
-                </button>
+                    <p className="text-[12px] text-zinc-700 dark:text-zinc-300 leading-snug line-clamp-2 break-words">
+                      {session.display}
+                    </p>
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDeleteSession(session.id, session.source);
+                    }}
+                    disabled={deleting}
+                    className="mr-2 my-2 p-1.5 self-start rounded text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/40 opacity-0 group-hover:opacity-100 focus:opacity-100 transition disabled:opacity-40"
+                    title="Delete session"
+                    aria-label="Delete session"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               );
             })}
           </div>

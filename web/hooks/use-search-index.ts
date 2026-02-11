@@ -104,5 +104,12 @@ export function useSearchIndex() {
     }
   }, []);
 
-  return { search, ready, upsertEntry };
+  const removeEntry = useCallback((sessionId: string, source: string) => {
+    const worker = workerRef.current;
+    if (worker) {
+      worker.postMessage({ type: "remove", sessionId, source });
+    }
+  }, []);
+
+  return { search, ready, upsertEntry, removeEntry };
 }

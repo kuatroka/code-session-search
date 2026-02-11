@@ -28,7 +28,8 @@ type RunFn = (sql: string, params?: (string | number | null)[]) => Promise<Recor
 type IncomingMessage =
   | { type: "init"; entries: SearchIndexEntry[] }
   | { type: "search"; id: number; query: string; source?: string | null }
-  | { type: "upsert"; entry: SearchIndexEntry };
+  | { type: "upsert"; entry: SearchIndexEntry }
+  | { type: "remove"; sessionId: string; source: string };
 
 type OutgoingMessage =
   | { type: "ready" }
@@ -77,11 +78,15 @@ async function populateIndex(runFn: RunFn, entries: SearchIndexEntry[]): Promise
 }
 
 async function upsertEntry(runFn: RunFn, e: SearchIndexEntry): Promise<void> {
-  await runFn("DELETE FROM sessions_fts WHERE session_id = ?", [e.id]);
+  await runFn("DELETE FROM sessions_fts WHERE session_id = ? AND source = ?", [e.id, e.source]);
   await runFn(
     "INSERT INTO sessions_fts (session_id, source, display, project, content, session_timestamp) VALUES (?, ?, ?, ?, ?, ?)",
     [e.id, e.source, e.display, e.project, e.content, e.timestamp]
   );
+}
+
+async function removeEntry(runFn: RunFn, sessionId: string, source: string): Promise<void> {
+  await runFn("DELETE FROM sessions_fts WHERE session_id = ? AND source = ?", [sessionId, source]);
 }
 
 async function searchIndex(runFn: RunFn, query: string, source?: string | null): Promise<ClientSearchResult[]> {
@@ -158,6 +163,13 @@ self.onmessage = async (event: MessageEvent<IncomingMessage>) => {
       case "upsert": {
         if (run) {
           await upsertEntry(run, msg.entry);
+        }
+        break;
+      }
+
+      case "remove": {
+        if (run) {
+          await removeEntry(run, msg.sessionId, msg.source);
         }
         break;
       }
