@@ -40,10 +40,14 @@ const SOURCES: Array<{ key: SessionSource | "all"; label: string }> = [
   { key: "pi", label: "Pi" },
 ];
 
+function sessionKey(sessionId: string, source: SessionSource): string {
+  return `${source}:${sessionId}`;
+}
+
 interface SessionListProps {
   sessions: Session[];
-  selectedSession: string | null;
-  onSelectSession: (sessionId: string) => void;
+  selectedSessionKey: string | null;
+  onSelectSession: (sessionId: string, source: SessionSource) => void;
   onDeleteSession: (sessionId: string, source: SessionSource) => Promise<void>;
   loading?: boolean;
   selectedSource: SessionSource | null;
@@ -54,7 +58,7 @@ interface SessionListProps {
 }
 
 const SessionList = memo(function SessionList(props: SessionListProps) {
-  const { sessions, selectedSession, onSelectSession, onDeleteSession, loading, selectedSource, onSelectSource, onSearchQueryChange, searchFn: clientSearch, searchReady } = props;
+  const { sessions, selectedSessionKey, onSelectSession, onDeleteSession, loading, selectedSource, onSelectSource, onSearchQueryChange, searchFn: clientSearch, searchReady } = props;
   const [search, setSearch] = useState("");
   const [highlightIdx, setHighlightIdx] = useState(-1);
   const [deletingSession, setDeletingSession] = useState<string | null>(null);
@@ -67,46 +71,50 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
   const pendingModelsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const ids = sessions
-      .map((s) => s.id)
-      .filter((id) => !modelMap.has(id) && !pendingModelsRef.current.has(id));
-    if (ids.length === 0) return;
+    const pendingSessions = sessions.filter((s) => {
+      const key = sessionKey(s.id, s.source);
+      return !modelMap.has(key) && !pendingModelsRef.current.has(key);
+    });
+    if (pendingSessions.length === 0) return;
+
+    const keys = pendingSessions.map((s) => sessionKey(s.id, s.source));
 
     // Mark as pending to prevent duplicate concurrent requests
-    for (const id of ids) pendingModelsRef.current.add(id);
+    for (const key of keys) pendingModelsRef.current.add(key);
 
     let cancelled = false;
     (async () => {
       const newEntries = new Map<string, ModelInfo | null>();
-      for (let i = 0; i < ids.length; i += 20) {
+      for (let i = 0; i < pendingSessions.length; i += 20) {
         if (cancelled) return;
-        const batch = ids.slice(i, i + 20);
+        const batch = pendingSessions.slice(i, i + 20);
         const results = await Promise.all(
-          batch.map(async (id) => {
+          batch.map(async (session) => {
+            const key = sessionKey(session.id, session.source);
             try {
-              const res = await fetch(`/api/session/${id}/model`);
+              const res = await fetch(`/api/session/${session.id}/model?source=${encodeURIComponent(session.source)}`);
               const data: ModelInfo | null = await res.json();
-              return [id, data] as const;
+              return [key, data] as const;
             } catch {
-              return [id, null] as const;
+              return [key, null] as const;
             }
           })
         );
-        for (const [id, data] of results) {
-          newEntries.set(id, data);
+        for (const [key, data] of results) {
+          newEntries.set(key, data);
         }
       }
       if (!cancelled) {
         // Remove from pending and store results
-        for (const id of ids) pendingModelsRef.current.delete(id);
+        for (const key of keys) pendingModelsRef.current.delete(key);
         setModelMap((prev) => {
           const next = new Map(prev);
-          for (const [id, data] of newEntries) next.set(id, data);
+          for (const [key, data] of newEntries) next.set(key, data);
           return next;
         });
       } else {
         // Cancelled — remove from pending so they can be retried
-        for (const id of ids) pendingModelsRef.current.delete(id);
+        for (const key of keys) pendingModelsRef.current.delete(key);
       }
     })();
 
@@ -162,10 +170,10 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
   const selectAtIndex = useCallback((idx: number) => {
     if (showSearchResults && searchResults) {
       const r = searchResults[idx];
-      if (r) onSelectSession(r.sessionId);
+      if (r) onSelectSession(r.sessionId, r.source as SessionSource);
     } else {
       const s = filteredSessions[idx];
-      if (s) onSelectSession(s.id);
+      if (s) onSelectSession(s.id, s.source);
     }
   }, [showSearchResults, searchResults, filteredSessions, onSelectSession]);
 
@@ -341,13 +349,13 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                     className={`group flex items-stretch ${
                       highlightIdx === idx
                         ? "bg-zinc-100 dark:bg-zinc-800"
-                        : selectedSession === result.sessionId
+                        : selectedSessionKey === sessionKey(result.sessionId, resultSource)
                           ? "bg-cyan-100 dark:bg-cyan-700/30"
                           : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
                     }`}
                   >
                     <button
-                      onClick={() => onSelectSession(result.sessionId)}
+                      onClick={() => onSelectSession(result.sessionId, resultSource)}
                       className="flex-1 px-3 py-3 text-left transition-colors"
                     >
                       <div className="flex items-center justify-between mb-1">
@@ -357,7 +365,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                             {result.project.split("/").pop() || result.project}
                           </span>
                           <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
-                          <ModelBadge model={modelMap.get(result.sessionId) ?? null} />
+                          <ModelBadge model={modelMap.get(sessionKey(result.sessionId, resultSource)) ?? null} />
                         </div>
                         <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
                           {result.timestamp ? formatTime(result.timestamp) : ""}
@@ -419,13 +427,13 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                   className={`group flex items-stretch overflow-hidden border-b border-zinc-200/60 dark:border-zinc-800/40 ${
                     isHighlighted
                       ? "bg-zinc-100 dark:bg-zinc-800"
-                      : selectedSession === session.id
+                      : selectedSessionKey === sessionKey(session.id, session.source)
                         ? "bg-cyan-100 dark:bg-cyan-700/30"
                         : "hover:bg-zinc-50 dark:hover:bg-zinc-900/60"
                   } ${virtualItem.index === 0 ? "border-t border-t-zinc-200/60 dark:border-t-zinc-800/40" : ""}`}
                 >
                   <button
-                    onClick={() => onSelectSession(session.id)}
+                    onClick={() => onSelectSession(session.id, session.source)}
                     className="flex-1 px-3 py-3.5 text-left transition-colors"
                   >
                     <div className="flex items-center justify-between mb-1">
@@ -435,7 +443,7 @@ const SessionList = memo(function SessionList(props: SessionListProps) {
                           {session.projectName}
                         </span>
                         <span className="text-[10px] text-zinc-400 dark:text-zinc-600">·</span>
-                        <ModelBadge model={modelMap.get(session.id) ?? null} />
+                        <ModelBadge model={modelMap.get(sessionKey(session.id, session.source)) ?? null} />
                       </div>
                       <span className="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0 ml-1">
                         {formatTime(session.timestamp)}

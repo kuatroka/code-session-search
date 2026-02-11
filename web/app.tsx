@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import type { Session, SessionSource } from "@claude-run-plus/api";
 import { PanelLeft, Copy, Check, Sun, Moon } from "lucide-react";
 import { formatTime } from "./utils";
@@ -79,12 +79,16 @@ function SourceBadge({ source }: { source: SessionSource }) {
   );
 }
 
+function sessionKey(sessionId: string, source: SessionSource): string {
+  return `${source}:${sessionId}`;
+}
+
 function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [projects, setProjects] = useState<string[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedSource, setSelectedSource] = useState<SessionSource | null>(null);
-  const [selectedSession, setSelectedSession] = useState<string | null>(null);
+  const [selectedSession, setSelectedSession] = useState<{ id: string; source: SessionSource } | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -125,7 +129,7 @@ function App() {
 
   const selectedSessionData = useMemo(() => {
     if (!selectedSession) return null;
-    return sessions.find((s) => s.id === selectedSession) || null;
+    return sessions.find((s) => s.id === selectedSession.id && s.source === selectedSession.source) || null;
   }, [sessions, selectedSession]);
 
   useEffect(() => {
@@ -155,9 +159,9 @@ function App() {
   const handleSessionsUpdate = useCallback((event: MessageEvent) => {
     const updates: Session[] = JSON.parse(event.data);
     setSessions((prev) => {
-      const sessionMap = new Map(prev.map((s) => [s.id, s]));
+      const sessionMap = new Map(prev.map((s) => [sessionKey(s.id, s.source), s]));
       for (const update of updates) {
-        sessionMap.set(update.id, update);
+        sessionMap.set(sessionKey(update.id, update.source), update);
       }
       return Array.from(sessionMap.values()).sort(
         (a, b) => b.timestamp - a.timestamp,
@@ -196,11 +200,11 @@ function App() {
     return result;
   }, [sessions, selectedProject, selectedSource]);
 
-  const handleSelectSession = useCallback((sessionId: string) => {
-    setSelectedSession(sessionId);
+  const handleSelectSession = useCallback((sessionId: string, source: SessionSource) => {
+    setSelectedSession({ id: sessionId, source });
     setCurrentModel(null);
-    // Fetch model from server (works for all sources including Factory settings.json)
-    fetch(`/api/session/${sessionId}/model`)
+    // Fetch model from server with source-qualified identity
+    fetch(`/api/session/${sessionId}/model?source=${encodeURIComponent(source)}`)
       .then((r) => r.json())
       .then((data: SessionModelInfo | null) => {
         if (data) setCurrentModel(data);
@@ -219,7 +223,7 @@ function App() {
     setSessions((prev) => prev.filter((s) => !(s.id === sessionId && s.source === source)));
     removeEntry(sessionId, source);
 
-    if (selectedSession === sessionId) {
+    if (selectedSession && selectedSession.id === sessionId && selectedSession.source === source) {
       setSelectedSession(null);
       setCurrentModel(null);
     }
@@ -260,7 +264,7 @@ function App() {
           </div>
           <SessionList
             sessions={filteredSessions}
-            selectedSession={selectedSession}
+            selectedSessionKey={selectedSession ? sessionKey(selectedSession.id, selectedSession.source) : null}
             onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession}
             loading={loading}
@@ -306,7 +310,7 @@ function App() {
         </div>
         <div className="flex-1 overflow-hidden">
           {selectedSession ? (
-            <SessionView sessionId={selectedSession} searchQuery={searchQuery} onModelChange={handleModelChange} />
+            <SessionView sessionId={selectedSession.id} source={selectedSession.source} searchQuery={searchQuery} onModelChange={handleModelChange} />
           ) : (
             <div className="flex h-full items-center justify-center text-zinc-400 dark:text-zinc-600">
               <div className="text-center">

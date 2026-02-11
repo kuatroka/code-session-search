@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { ChevronUp, ChevronDown } from "lucide-react";
-import type { ConversationMessage } from "@claude-run-plus/api";
+import type { ConversationMessage, SessionSource } from "@claude-run-plus/api";
 import MessageBlock from "./message-block";
 import ScrollToBottomButton from "./scroll-to-bottom-button";
 import { sanitizeText } from "../utils";
@@ -17,6 +17,7 @@ export interface SessionModelInfo {
 
 interface SessionViewProps {
   sessionId: string;
+  source: SessionSource;
   searchQuery?: string;
   onModelChange?: (info: SessionModelInfo | null) => void;
 }
@@ -75,7 +76,7 @@ function extractLatestModel(messages: ConversationMessage[]): SessionModelInfo |
 }
 
 function SessionView(props: SessionViewProps) {
-  const { sessionId, searchQuery, onModelChange } = props;
+  const { sessionId, source, searchQuery, onModelChange } = props;
 
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -104,7 +105,7 @@ function SessionView(props: SessionViewProps) {
     if (eventSourceRef.current) eventSourceRef.current.close();
 
     const eventSource = new EventSource(
-      `/api/conversation/${sessionId}/stream?offset=${offsetRef.current}`
+      `/api/conversation/${sessionId}/stream?source=${encodeURIComponent(source)}&offset=${offsetRef.current}`
     );
     eventSourceRef.current = eventSource;
 
@@ -131,7 +132,7 @@ function SessionView(props: SessionViewProps) {
         retryTimeoutRef.current = setTimeout(() => connect(), delay);
       }
     };
-  }, [sessionId]);
+  }, [sessionId, source]);
 
   // Report latest model to parent whenever messages change
   useEffect(() => {

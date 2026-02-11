@@ -116,5 +116,5 @@ export function rerankSearchRows<T extends RankedSearchRow>(rows: T[], query: st
       // Finally: most recent first
       return b.timestamp - a.timestamp;
     })
-    .map(({ _boost: _, _coverage: __, ...row }) => row as T);
+    .map(({ _boost: _, _coverage: __, ...row }) => row as unknown as T);
 }

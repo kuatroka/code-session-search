@@ -60,6 +60,18 @@ export interface ServerOptions {
   open?: boolean;
 }
 
+function parseSourceParam(sourceQuery?: string): SessionSource | undefined {
+  if (!sourceQuery) return undefined;
+  if (sourceQuery === "claude" || sourceQuery === "factory" || sourceQuery === "codex" || sourceQuery === "pi") {
+    return sourceQuery;
+  }
+  return undefined;
+}
+
+function sessionIdentityKey(sessionId: string, source: SessionSource): string {
+  return `${source}:${sessionId}`;
+}
+
 export function createServer(options: ServerOptions) {
   const { port, claudeDir, dev = false, open: shouldOpen = true } = options;
 
@@ -87,13 +99,9 @@ export function createServer(options: ServerOptions) {
   app.delete("/api/sessions/:id", async (c) => {
     const sessionId = c.req.param("id");
     const sourceQuery = c.req.query("source");
-
-    let source: SessionSource | undefined;
-    if (sourceQuery) {
-      if (sourceQuery !== "claude" && sourceQuery !== "factory" && sourceQuery !== "codex" && sourceQuery !== "pi") {
-        return c.json({ ok: false, error: "Invalid source" }, 400);
-      }
-      source = sourceQuery;
+    const source = parseSourceParam(sourceQuery);
+    if (sourceQuery && !source) {
+      return c.json({ ok: false, error: "Invalid source" }, 400);
     }
 
     const deleted = await deleteSession(sessionId, source);
@@ -138,12 +146,13 @@ export function createServer(options: ServerOptions) {
           const sessions = await getSessions();
           setExpectedSessions(sessions);
           const newOrUpdated = sessions.filter((s) => {
-            const known = knownSessions.get(s.id);
+            const key = sessionIdentityKey(s.id, s.source);
+            const known = knownSessions.get(key);
             return known === undefined || known !== s.timestamp;
           });
 
           for (const s of sessions) {
-            knownSessions.set(s.id, s.timestamp);
+            knownSessions.set(sessionIdentityKey(s.id, s.source), s.timestamp);
           }
 
           if (newOrUpdated.length > 0) {
@@ -160,16 +169,16 @@ export function createServer(options: ServerOptions) {
       const handleContentChange = async (sessionId: string, _filePath: string, source: SessionSource) => {
         if (!isConnected) return;
         try {
-          const content = await getAllSessionContent(sessionId);
+          const content = await getAllSessionContent(sessionId, source);
           const sessions = await getSessions();
-          let session = sessions.find((s) => s.id === sessionId);
+          let session = sessions.find((s) => s.id === sessionId && s.source === source);
 
           // For new sessions not yet in history.jsonl, build a minimal session object
           if (!session) {
             // Invalidate cache and retry — history.jsonl may have just been written
             invalidateHistoryCache();
             const retried = await getSessions();
-            session = retried.find((s) => s.id === sessionId);
+            session = retried.find((s) => s.id === sessionId && s.source === source);
           }
 
           if (!session) {
@@ -228,7 +237,7 @@ export function createServer(options: ServerOptions) {
       try {
         const sessions = await getSessions();
         for (const s of sessions) {
-          knownSessions.set(s.id, s.timestamp);
+          knownSessions.set(sessionIdentityKey(s.id, s.source), s.timestamp);
         }
 
         await stream.writeSSE({
@@ -253,18 +262,34 @@ export function createServer(options: ServerOptions) {
 
   app.get("/api/conversation/:id", async (c) => {
     const sessionId = c.req.param("id");
-    const messages = await getConversation(sessionId);
+    const sourceQuery = c.req.query("source");
+    const source = parseSourceParam(sourceQuery);
+    if (sourceQuery && !source) {
+      return c.json({ ok: false, error: "Invalid source" }, 400);
+    }
+    const messages = await getConversation(sessionId, source);
     return c.json(messages);
   });
 
   app.get("/api/session/:id/model", async (c) => {
     const sessionId = c.req.param("id");
-    const model = await getSessionLatestModel(sessionId);
+    const sourceQuery = c.req.query("source");
+    const source = parseSourceParam(sourceQuery);
+    if (sourceQuery && !source) {
+      return c.json({ ok: false, error: "Invalid source" }, 400);
+    }
+    const model = await getSessionLatestModel(sessionId, source);
     return c.json(model);
   });
 
   app.get("/api/conversation/:id/stream", async (c) => {
     const sessionId = c.req.param("id");
+    const sourceQuery = c.req.query("source");
+    const source = parseSourceParam(sourceQuery);
+    if (sourceQuery && !source) {
+      return c.json({ ok: false, error: "Invalid source" }, 400);
+    }
+
     const offsetParam = c.req.query("offset");
     let offset = offsetParam ? parseInt(offsetParam, 10) : 0;
 
@@ -276,13 +301,16 @@ export function createServer(options: ServerOptions) {
         offSessionChange(handleSessionChange);
       };
 
-      const handleSessionChange = async (changedSessionId: string, _filePath: string, _source: SessionSource) => {
+      const handleSessionChange = async (changedSessionId: string, _filePath: string, changedSource: SessionSource) => {
         if (changedSessionId !== sessionId || !isConnected) {
+          return;
+        }
+        if (source && changedSource !== source) {
           return;
         }
 
         const { messages: newMessages, nextOffset: newOffset } =
-          await getConversationStream(sessionId, offset);
+          await getConversationStream(sessionId, offset, source ?? changedSource);
         offset = newOffset;
 
         if (newMessages.length > 0) {
@@ -304,6 +332,7 @@ export function createServer(options: ServerOptions) {
         const { messages, nextOffset } = await getConversationStream(
           sessionId,
           offset,
+          source,
         );
         offset = nextOffset;
 
@@ -348,7 +377,7 @@ export function createServer(options: ServerOptions) {
     const entries = await Promise.all(
       sessions.map(async (s) => {
         try {
-          const content = await getAllSessionContent(s.id);
+          const content = await getAllSessionContent(s.id, s.source);
           return { id: s.id, source: s.source, display: s.display, project: s.project, content, timestamp: s.timestamp };
         } catch {
           return { id: s.id, source: s.source, display: s.display, project: s.project, content: "", timestamp: s.timestamp };
@@ -389,11 +418,11 @@ export function createServer(options: ServerOptions) {
   onSessionChange(async (sessionId: string, filePath: string, source: SessionSource) => {
     addToFileIndex(sessionId, filePath, source);
     markSessionDirty(sessionId);
-    invalidateModelCache(sessionId);
+    invalidateModelCache(sessionId, source);
     try {
-      const content = await getAllSessionContent(sessionId);
+      const content = await getAllSessionContent(sessionId, source);
       const sessions = await getSessions();
-      const session = sessions.find((s) => s.id === sessionId);
+      const session = sessions.find((s) => s.id === sessionId && s.source === source);
       if (session) {
         indexSession(sessionId, source, session.display, session.project, content, session.timestamp);
       }
@@ -410,15 +439,15 @@ export function createServer(options: ServerOptions) {
     if (dirtyIds.length === 0) return;
 
     const sessions = await getSessions();
-    const sessionMap = new Map(sessions.map((s) => [s.id, s]));
 
     for (const id of dirtyIds) {
-      try {
-        const session = sessionMap.get(id);
-        if (!session) continue;
-        const content = await getAllSessionContent(id);
-        indexSession(id, session.source, session.display, session.project, content, session.timestamp);
-      } catch { /* skip */ }
+      const matchingSessions = sessions.filter((s) => s.id === id);
+      for (const session of matchingSessions) {
+        try {
+          const content = await getAllSessionContent(id, session.source);
+          indexSession(id, session.source, session.display, session.project, content, session.timestamp);
+        } catch { /* skip */ }
+      }
     }
   }
 
@@ -459,7 +488,7 @@ export function createServer(options: ServerOptions) {
           for (const session of sessions) {
             if (isSessionIndexed(session.id, session.source)) continue;
             try {
-              const content = await getAllSessionContent(session.id);
+              const content = await getAllSessionContent(session.id, session.source);
               indexSession(session.id, session.source, session.display, session.project, content, session.timestamp);
               indexed++;
               if (indexed % 50 === 0) {

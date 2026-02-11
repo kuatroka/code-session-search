@@ -62,4 +62,33 @@ describe("dedupeSessionsByLatestTimestamp", () => {
 
     expect(deduped.map((s) => s.id)).toEqual(["newer", "middle", "older"]);
   });
+
+  test("keeps sessions with same id when sources differ", () => {
+    const sessions: Session[] = [
+      {
+        id: "same-id",
+        display: "claude session",
+        timestamp: 5_000,
+        project: "/tmp",
+        projectName: "tmp",
+        source: "claude",
+      },
+      {
+        id: "same-id",
+        display: "factory session",
+        timestamp: 6_000,
+        project: "/tmp",
+        projectName: "tmp",
+        source: "factory",
+      },
+    ];
+
+    const deduped = dedupeSessionsByLatestTimestamp(sessions);
+
+    expect(deduped).toHaveLength(2);
+    expect(deduped.map((s) => `${s.source}:${s.id}`)).toEqual([
+      "factory:same-id",
+      "claude:same-id",
+    ]);
+  });
 });

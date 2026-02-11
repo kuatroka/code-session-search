@@ -87,6 +87,38 @@ const fileIndex = new Map<string, { path: string; source: SessionSource }>();
 let historyCache: HistoryEntry[] | null = null;
 const pendingRequests = new Map<string, Promise<unknown>>();
 
+function sessionKey(sessionId: string, source: SessionSource): string {
+  return `${source}:${sessionId}`;
+}
+
+function setFileIndexEntry(sessionId: string, filePath: string, source: SessionSource): void {
+  fileIndex.set(sessionKey(sessionId, source), { path: filePath, source });
+}
+
+function getFileIndexEntry(sessionId: string, sourceHint?: SessionSource): { path: string; source: SessionSource } | undefined {
+  if (sourceHint) {
+    return fileIndex.get(sessionKey(sessionId, sourceHint));
+  }
+
+  for (const source of ["claude", "factory", "codex", "pi"] as const) {
+    const entry = fileIndex.get(sessionKey(sessionId, source));
+    if (entry) return entry;
+  }
+
+  return undefined;
+}
+
+function deleteFileIndexEntry(sessionId: string, sourceHint?: SessionSource): void {
+  if (sourceHint) {
+    fileIndex.delete(sessionKey(sessionId, sourceHint));
+    return;
+  }
+
+  for (const source of ["claude", "factory", "codex", "pi"] as const) {
+    fileIndex.delete(sessionKey(sessionId, source));
+  }
+}
+
 export interface StorageInitOptions {
   claudeDir?: string;
   factoryDir?: string;
@@ -134,7 +166,7 @@ export function invalidateHistoryCache(): void {
 }
 
 export function addToFileIndex(sessionId: string, filePath: string, source: SessionSource = "claude"): void {
-  fileIndex.set(sessionId, { path: filePath, source });
+  setFileIndexEntry(sessionId, filePath, source);
 }
 
 function getProjectName(projectPath: string): string {
@@ -278,7 +310,7 @@ async function buildClaudeFileIndex(): Promise<void> {
           for (const file of files) {
             if (file.endsWith(".jsonl")) {
               const sessionId = basename(file, ".jsonl");
-              fileIndex.set(sessionId, { path: join(projectPath, file), source: "claude" });
+              setFileIndexEntry(sessionId, join(projectPath, file), "claude");
             }
           }
         } catch { /* ignore */ }
@@ -362,7 +394,7 @@ async function buildFactoryFileIndex(): Promise<void> {
           for (const file of files) {
             if (file.endsWith(".jsonl")) {
               const sessionId = basename(file, ".jsonl");
-              fileIndex.set(sessionId, { path: join(projectPath, file), source: "factory" });
+              setFileIndexEntry(sessionId, join(projectPath, file), "factory");
             }
           }
         } catch { /* ignore */ }
@@ -414,8 +446,8 @@ async function loadFactoryHistory(): Promise<HistoryEntry[]> {
 }
 
 async function getFactoryConversation(sessionId: string): Promise<ConversationMessage[]> {
-  const entry = fileIndex.get(sessionId);
-  if (!entry || entry.source !== "factory") {
+  const entry = getFileIndexEntry(sessionId, "factory");
+  if (!entry) {
     const filePath = await findFactorySessionFile(sessionId);
     if (!filePath) return [];
     return parseFactorySession(filePath);
@@ -499,7 +531,7 @@ async function buildCodexFileIndex(): Promise<void> {
   const sessionsDir = join(codexDir, "sessions");
   try {
     await walkCodexSessions(sessionsDir, (sessionId, filePath) => {
-      fileIndex.set(sessionId, { path: filePath, source: "codex" });
+      setFileIndexEntry(sessionId, filePath, "codex");
     });
   } catch { /* sessions dir may not exist */ }
 }
@@ -558,7 +590,7 @@ async function loadCodexHistory(): Promise<HistoryEntry[]> {
 async function enrichCodexEntries(entries: HistoryEntry[]): Promise<void> {
   for (const entry of entries) {
     if (entry.source !== "codex" || !entry.sessionId) continue;
-    const indexed = fileIndex.get(entry.sessionId);
+    const indexed = getFileIndexEntry(entry.sessionId, "codex");
     if (!indexed) continue;
     try {
       const content = await readFile(indexed.path, "utf-8");
@@ -594,8 +626,8 @@ async function enrichCodexEntries(entries: HistoryEntry[]): Promise<void> {
 }
 
 async function findCodexSessionFile(sessionId: string): Promise<string | null> {
-  const indexed = fileIndex.get(sessionId);
-  if (indexed?.source === "codex") {
+  const indexed = getFileIndexEntry(sessionId, "codex");
+  if (indexed) {
     return indexed.path;
   }
 
@@ -609,7 +641,7 @@ async function findCodexSessionFile(sessionId: string): Promise<string | null> {
     });
 
     if (foundPath) {
-      fileIndex.set(sessionId, { path: foundPath, source: "codex" });
+      setFileIndexEntry(sessionId, foundPath, "codex");
     }
 
     return foundPath;
@@ -784,7 +816,7 @@ async function buildPiFileIndex(): Promise<void> {
   try {
     await walkPiSessions(sessionsDir, (filePath, fileName) => {
       const sessionId = parsePiSessionIdFromFilename(fileName);
-      fileIndex.set(sessionId, { path: filePath, source: "pi" });
+      setFileIndexEntry(sessionId, filePath, "pi");
     });
   } catch {
     // sessions dir may not exist
@@ -880,7 +912,7 @@ async function loadPiHistory(): Promise<HistoryEntry[]> {
         }
       }
 
-      fileIndex.set(sessionId, { path: filePath, source: "pi" });
+      setFileIndexEntry(sessionId, filePath, "pi");
 
       entries.push({
         display,
@@ -1092,8 +1124,8 @@ async function parsePiSession(filePath: string): Promise<ConversationMessage[]> 
 }
 
 async function getPiConversation(sessionId: string): Promise<ConversationMessage[]> {
-  const entry = fileIndex.get(sessionId);
-  if (entry?.source === "pi") {
+  const entry = getFileIndexEntry(sessionId, "pi");
+  if (entry) {
     return parsePiSession(entry.path);
   }
 
@@ -1114,8 +1146,8 @@ async function dedupe<T>(key: string, fn: () => Promise<T>): Promise<T> {
 }
 
 async function findClaudeSessionFile(sessionId: string): Promise<string | null> {
-  const entry = fileIndex.get(sessionId);
-  if (entry?.source === "claude") return entry.path;
+  const entry = getFileIndexEntry(sessionId, "claude");
+  if (entry) return entry.path;
 
   const targetFile = `${sessionId}.jsonl`;
   const projectsDir = join(claudeDir, "projects");
@@ -1136,7 +1168,7 @@ async function findClaudeSessionFile(sessionId: string): Promise<string | null> 
     );
     const filePath = results.find((r) => r !== null);
     if (filePath) {
-      fileIndex.set(sessionId, { path: filePath, source: "claude" });
+      setFileIndexEntry(sessionId, filePath, "claude");
       return filePath;
     }
   } catch { /* ignore */ }
@@ -1157,16 +1189,17 @@ async function loadAllHistory(): Promise<HistoryEntry[]> {
 }
 
 export function dedupeSessionsByLatestTimestamp(sessions: Session[]): Session[] {
-  const latestBySessionId = new Map<string, Session>();
+  const latestBySessionKey = new Map<string, Session>();
 
   for (const session of sessions) {
-    const existing = latestBySessionId.get(session.id);
+    const key = sessionKey(session.id, session.source);
+    const existing = latestBySessionKey.get(key);
     if (!existing || session.timestamp > existing.timestamp) {
-      latestBySessionId.set(session.id, session);
+      latestBySessionKey.set(key, session);
     }
   }
 
-  return Array.from(latestBySessionId.values()).sort((a, b) => b.timestamp - a.timestamp);
+  return Array.from(latestBySessionKey.values()).sort((a, b) => b.timestamp - a.timestamp);
 }
 
 export async function loadStorage(): Promise<void> {
@@ -1229,17 +1262,19 @@ export async function getProjects(): Promise<string[]> {
     .map(([project]) => project);
 }
 
-export async function getConversation(sessionId: string): Promise<ConversationMessage[]> {
-  return dedupe(`getConversation:${sessionId}`, async () => {
-    const entry = fileIndex.get(sessionId);
+export async function getConversation(sessionId: string, sourceHint?: SessionSource): Promise<ConversationMessage[]> {
+  const dedupeKey = sourceHint ? `getConversation:${sourceHint}:${sessionId}` : `getConversation:${sessionId}`;
+  return dedupe(dedupeKey, async () => {
+    const entry = getFileIndexEntry(sessionId, sourceHint);
+    const source = sourceHint ?? entry?.source;
 
-    if (entry?.source === "factory") {
+    if (source === "factory") {
       return getFactoryConversation(sessionId);
     }
-    if (entry?.source === "codex") {
+    if (source === "codex") {
       return getCodexConversation(sessionId);
     }
-    if (entry?.source === "pi") {
+    if (source === "pi") {
       return getPiConversation(sessionId);
     }
 
@@ -1274,15 +1309,19 @@ export async function getConversation(sessionId: string): Promise<ConversationMe
 
 export async function getConversationStream(
   sessionId: string,
-  fromOffset: number = 0
+  fromOffset: number = 0,
+  sourceHint?: SessionSource,
 ): Promise<StreamResult> {
-  const entry = fileIndex.get(sessionId);
+  const entry = getFileIndexEntry(sessionId, sourceHint);
+  const source = sourceHint ?? entry?.source ?? "claude";
   let filePath: string | null = null;
 
   if (entry) {
     filePath = entry.path;
-  } else {
+  } else if (source === "claude") {
     filePath = await findClaudeSessionFile(sessionId);
+  } else {
+    filePath = await findSessionFileBySource(sessionId, source);
   }
 
   if (!filePath) {
@@ -1290,8 +1329,8 @@ export async function getConversationStream(
   }
 
   // For non-Claude sources, use message-count offset (incremental updates)
-  if (entry && entry.source !== "claude") {
-    const messages = await getConversation(sessionId);
+  if (source !== "claude") {
+    const messages = await getConversation(sessionId, source);
     if (fromOffset >= messages.length) {
       return { messages: [], nextOffset: messages.length };
     }
@@ -1346,9 +1385,9 @@ export async function getConversationStream(
   }
 }
 
-export function getSessionSource(sessionId: string): SessionSource {
-  const entry = fileIndex.get(sessionId);
-  return entry?.source ?? "claude";
+export function getSessionSource(sessionId: string, sourceHint?: SessionSource): SessionSource {
+  const entry = getFileIndexEntry(sessionId, sourceHint);
+  return entry?.source ?? sourceHint ?? "claude";
 }
 
 function deriveProvider(model: string): string {
@@ -1361,15 +1400,35 @@ function deriveProvider(model: string): string {
 
 const modelCache = new Map<string, SessionModelInfo | null>();
 
-export function invalidateModelCache(sessionId: string): void {
-  modelCache.delete(sessionId);
+function modelCacheKey(sessionId: string, sourceHint?: SessionSource): string {
+  return sourceHint ? `${sourceHint}:${sessionId}` : sessionId;
 }
 
-export async function getSessionLatestModel(sessionId: string): Promise<SessionModelInfo | null> {
-  const cached = modelCache.get(sessionId);
+export function invalidateModelCache(sessionId: string, sourceHint?: SessionSource): void {
+  if (sourceHint) {
+    modelCache.delete(modelCacheKey(sessionId, sourceHint));
+    return;
+  }
+
+  modelCache.delete(sessionId);
+  for (const source of ["claude", "factory", "codex", "pi"] as const) {
+    modelCache.delete(modelCacheKey(sessionId, source));
+  }
+}
+
+export async function getSessionLatestModel(sessionId: string, sourceHint?: SessionSource): Promise<SessionModelInfo | null> {
+  const cacheKey = modelCacheKey(sessionId, sourceHint);
+  const cached = modelCache.get(cacheKey);
   if (cached !== undefined) return cached;
 
-  const entry = fileIndex.get(sessionId);
+  let entry = getFileIndexEntry(sessionId, sourceHint);
+  if (!entry && sourceHint) {
+    const path = await findSessionFileBySource(sessionId, sourceHint);
+    if (path) {
+      setFileIndexEntry(sessionId, path, sourceHint);
+      entry = { path, source: sourceHint };
+    }
+  }
   if (!entry) return null;
 
   try {
@@ -1388,7 +1447,7 @@ export async function getSessionLatestModel(sessionId: string): Promise<SessionM
             model: parsed.modelId,
             provider: parsed.provider || deriveProvider(parsed.modelId),
           };
-          modelCache.set(sessionId, result);
+          modelCache.set(cacheKey, result);
           return result;
         }
         // Claude/Codex assistant messages with model field
@@ -1398,7 +1457,7 @@ export async function getSessionLatestModel(sessionId: string): Promise<SessionM
             model,
             provider: deriveProvider(model),
           };
-          modelCache.set(sessionId, result);
+          modelCache.set(cacheKey, result);
           return result;
         }
         // Factory "message" type with role=assistant
@@ -1408,7 +1467,7 @@ export async function getSessionLatestModel(sessionId: string): Promise<SessionM
             model,
             provider: deriveProvider(model),
           };
-          modelCache.set(sessionId, result);
+          modelCache.set(cacheKey, result);
           return result;
         }
       } catch { /* skip malformed */ }
@@ -1425,13 +1484,13 @@ export async function getSessionLatestModel(sessionId: string): Promise<SessionM
         const rawModel = settings.model.replace(/^custom:/, "");
         const provider = settings.providerLock || deriveProvider(rawModel);
         const result: SessionModelInfo = { model: rawModel, provider };
-        modelCache.set(sessionId, result);
+        modelCache.set(cacheKey, result);
         return result;
       }
     } catch { /* no settings file */ }
   }
 
-  modelCache.set(sessionId, null);
+  modelCache.set(cacheKey, null);
   return null;
 }
 
@@ -1446,10 +1505,10 @@ async function resolveSessionFileForDelete(
   sessionId: string,
   sourceHint?: SessionSource,
 ): Promise<{ path: string; source: SessionSource } | null> {
-  const indexed = fileIndex.get(sessionId);
+  const indexed = getFileIndexEntry(sessionId, sourceHint);
 
   if (sourceHint) {
-    if (indexed?.source === sourceHint) {
+    if (indexed) {
       return indexed;
     }
 
@@ -1489,13 +1548,14 @@ export async function deleteSession(sessionId: string, sourceHint?: SessionSourc
     }
   }
 
-  const indexed = fileIndex.get(sessionId);
-  if (!indexed || !sourceHint || indexed.source === sourceHint) {
-    fileIndex.delete(sessionId);
-  }
+  deleteFileIndexEntry(sessionId, sourceHint ?? resolved.source);
 
   pendingRequests.delete(`getConversation:${sessionId}`);
   pendingRequests.delete(`content:${sessionId}`);
+  for (const source of ["claude", "factory", "codex", "pi"] as const) {
+    pendingRequests.delete(`getConversation:${source}:${sessionId}`);
+    pendingRequests.delete(`content:${source}:${sessionId}`);
+  }
   pendingRequests.delete("getSessions");
   pendingRequests.delete("getProjects");
   invalidateHistoryCache();
@@ -1522,9 +1582,10 @@ function sanitizeForIndex(text: string): string {
   return result.trim();
 }
 
-export function getAllSessionContent(sessionId: string): Promise<string> {
-  return dedupe(`content:${sessionId}`, async () => {
-    const messages = await getConversation(sessionId);
+export function getAllSessionContent(sessionId: string, sourceHint?: SessionSource): Promise<string> {
+  const dedupeKey = sourceHint ? `content:${sourceHint}:${sessionId}` : `content:${sessionId}`;
+  return dedupe(dedupeKey, async () => {
+    const messages = await getConversation(sessionId, sourceHint);
     const parts: string[] = [];
     for (const msg of messages) {
       if (!msg.message) continue;
